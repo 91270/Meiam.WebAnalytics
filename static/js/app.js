@@ -290,7 +290,7 @@
             var serviceError = ((data.health || {}).realtime_service || {}).error || '';
             showNotice('实时采集服务未正常运行' + (serviceError ? '：' + serviceError : '，当前不会产生新统计数据。'), true);
         } else if (diagnostics.backfill_for_site) {
-            showNotice('正在从当前及轮转访问日志恢复完整历史数据；点击右上角“刷新”可查看已完成部分。');
+            showNotice('');
         } else if (!diagnostics.webserver_configured && !diagnostics.nginx_configured) {
             showNotice('当前网站尚未写入 ' + (diagnostics.web_server === 'apache' ? 'Apache' : 'Nginx') + ' 实时日志扩展配置。', true);
         } else if (Number(queue.write_errors || 0) > 0) {

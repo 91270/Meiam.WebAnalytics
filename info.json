@@ -2,7 +2,7 @@
   "title": "网站访问分析",
   "name": "WebAnalytics",
   "ps": "离线分析网站访问日志，统计 PV、UV、IP、流量、请求和趋势",
-  "versions": "0.4.9",
+  "versions": "0.4.10",
   "checks": "/www/server/panel/plugin/WebAnalytics",
   "author": "Meiam",
   "home": "https://592.la"
