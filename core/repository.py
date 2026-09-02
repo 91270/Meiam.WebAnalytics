@@ -246,9 +246,130 @@ class Repository:
             (site_id, hour_ts, kind, sketch.precision, sketch.dumps(), int(time.time())),
         )
 
+    @classmethod
+    def _merge_site_rows(
+        cls, connection: sqlite3.Connection, canonical_id: int, duplicate_id: int
+    ) -> None:
+        """合并同一宝塔站点因日志路径变化产生的重复内部记录。"""
+        if canonical_id == duplicate_id:
+            return
+        connection.execute(
+            """
+            INSERT INTO metric_minute(site_id, minute_ts, requests, pv, body_bytes,
+                                      errors, bot_requests)
+            SELECT ?, minute_ts, requests, pv, body_bytes, errors, bot_requests
+            FROM metric_minute WHERE site_id=?
+            ON CONFLICT(site_id, minute_ts) DO UPDATE SET
+                requests=MAX(metric_minute.requests, excluded.requests),
+                pv=MAX(metric_minute.pv, excluded.pv),
+                body_bytes=MAX(metric_minute.body_bytes, excluded.body_bytes),
+                errors=MAX(metric_minute.errors, excluded.errors),
+                bot_requests=MAX(metric_minute.bot_requests, excluded.bot_requests)
+            """,
+            (canonical_id, duplicate_id),
+        )
+        for table, hash_column in (
+            ("visitor_day", "visitor_hash"),
+            ("ip_day", "ip_hash"),
+        ):
+            connection.execute(
+                "INSERT OR IGNORE INTO {table}(site_id, day, {column}, first_minute) "
+                "SELECT ?, day, {column}, first_minute FROM {table} WHERE site_id=?".format(
+                    table=table, column=hash_column
+                ),
+                (canonical_id, duplicate_id),
+            )
+        hll_rows = connection.execute(
+            "SELECT hour_ts, kind, precision, registers FROM unique_hll_hour "
+            "WHERE site_id=?",
+            (duplicate_id,),
+        ).fetchall()
+        for row in hll_rows:
+            cls._store_hll(
+                connection,
+                canonical_id,
+                int(row["hour_ts"]),
+                str(row["kind"]),
+                HyperLogLog.loads(row["registers"], int(row["precision"])),
+            )
+
+        duplicate_cursor = connection.execute(
+            "SELECT * FROM file_cursors WHERE site_id=?", (duplicate_id,)
+        ).fetchone()
+        canonical_cursor = connection.execute(
+            "SELECT * FROM file_cursors WHERE site_id=?", (canonical_id,)
+        ).fetchone()
+        if duplicate_cursor is not None and (
+            canonical_cursor is None
+            or int(duplicate_cursor["updated_at"] or 0)
+            >= int(canonical_cursor["updated_at"] or 0)
+        ):
+            connection.execute("DELETE FROM file_cursors WHERE site_id=?", (canonical_id,))
+            connection.execute(
+                """INSERT INTO file_cursors(site_id, log_path, inode, device, offset,
+                                              size, mtime_ns, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    canonical_id,
+                    duplicate_cursor["log_path"],
+                    duplicate_cursor["inode"],
+                    duplicate_cursor["device"],
+                    duplicate_cursor["offset"],
+                    duplicate_cursor["size"],
+                    duplicate_cursor["mtime_ns"],
+                    duplicate_cursor["updated_at"],
+                ),
+            )
+        connection.execute("DELETE FROM sites WHERE id=?", (duplicate_id,))
+
     def register_site(self, site: SiteDefinition) -> int:
         now = int(time.time())
         with self.session() as connection:
+            if site.panel_site_id > 0:
+                panel_rows = connection.execute(
+                    "SELECT id, log_path FROM sites WHERE panel_site_id=? ORDER BY id",
+                    (site.panel_site_id,),
+                ).fetchall()
+                if panel_rows:
+                    canonical_id = int(panel_rows[0]["id"])
+                    previous_log_path = str(panel_rows[0]["log_path"] or "")
+                    duplicate_ids = [int(row["id"]) for row in panel_rows[1:]]
+                    path_row = connection.execute(
+                        "SELECT id, panel_site_id FROM sites WHERE log_path=?",
+                        (site.log_path,),
+                    ).fetchone()
+                    if (
+                        path_row is not None
+                        and int(path_row["id"]) != canonical_id
+                        and int(path_row["id"]) not in duplicate_ids
+                        and int(path_row["panel_site_id"] or 0) <= 0
+                    ):
+                        duplicate_ids.append(int(path_row["id"]))
+                    for duplicate_id in duplicate_ids:
+                        self._merge_site_rows(connection, canonical_id, duplicate_id)
+                    connection.execute(
+                        """UPDATE sites SET name=?, document_root=?, log_path=?,
+                                              web_server=?, enabled=1, updated_at=?
+                           WHERE id=?""",
+                        (
+                            site.name,
+                            site.document_root,
+                            site.log_path,
+                            site.web_server,
+                            now,
+                            canonical_id,
+                        ),
+                    )
+                    if previous_log_path != site.log_path:
+                        cursor = connection.execute(
+                            "SELECT log_path FROM file_cursors WHERE site_id=?",
+                            (canonical_id,),
+                        ).fetchone()
+                        if cursor is not None and str(cursor["log_path"] or "") != site.log_path:
+                            connection.execute(
+                                "DELETE FROM file_cursors WHERE site_id=?", (canonical_id,)
+                            )
+                    return canonical_id
             connection.execute(
                 """
                 INSERT INTO sites(panel_site_id, name, document_root, log_path, web_server,

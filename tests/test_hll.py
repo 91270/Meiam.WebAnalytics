@@ -78,6 +78,55 @@ class HyperLogLogTests(unittest.TestCase):
             self.assertEqual(sites[0]["web_server"], "nginx")
             self.assertEqual(sites[0]["enabled"], 1)
 
+    def test_duplicate_panel_site_rows_are_merged_when_log_path_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Repository(Path(directory) / "stats.db")
+            repository.initialize()
+            old_id = repository.register_site(
+                SiteDefinition(7, "example.test", "/srv/example", "/logs/inferred.log")
+            )
+            with repository.session() as connection:
+                connection.execute(
+                    """INSERT INTO metric_minute
+                       (site_id,minute_ts,requests,pv,body_bytes,errors,bot_requests)
+                       VALUES (?,?,?,?,?,?,?)""",
+                    (old_id, 1788314400, 10, 6, 1000, 1, 0),
+                )
+                cursor = connection.execute(
+                    """INSERT INTO sites(panel_site_id,name,document_root,log_path,
+                                         web_server,enabled,created_at,updated_at)
+                       VALUES (?,?,?,?,?,?,?,?)""",
+                    (7, "example.test", "/srv/example", "/logs/actual.log", "nginx", 1, 2, 2),
+                )
+                duplicate_id = int(cursor.lastrowid)
+                connection.execute(
+                    """INSERT INTO metric_minute
+                       (site_id,minute_ts,requests,pv,body_bytes,errors,bot_requests)
+                       VALUES (?,?,?,?,?,?,?),(?,?,?,?,?,?,?)""",
+                    (
+                        duplicate_id, 1788314400, 3, 2, 300, 0, 0,
+                        duplicate_id, 1788314460, 2, 1, 200, 0, 0,
+                    ),
+                )
+
+            resolved_id = repository.register_site(
+                SiteDefinition(7, "example.test", "/srv/example", "/logs/actual.log")
+            )
+            self.assertEqual(resolved_id, old_id)
+            sites = repository.list_sites()
+            self.assertEqual(len(sites), 1)
+            self.assertEqual(sites[0]["log_path"], "/logs/actual.log")
+            overview = repository.get_overview(
+                old_id, 1788314000, 1788315000
+            )
+            self.assertEqual(overview["requests"], 12)
+            self.assertEqual(overview["pv"], 7)
+            with repository.session() as connection:
+                count = connection.execute(
+                    "SELECT COUNT(*) AS total FROM sites WHERE panel_site_id=7"
+                ).fetchone()
+            self.assertEqual(int(count["total"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
