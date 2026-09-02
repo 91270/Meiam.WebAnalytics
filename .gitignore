@@ -1,0 +1,11 @@
+data/
+__pycache__/
+*.py[cod]
+*.db
+*.db-wal
+*.db-shm
+collector.log
+.coverage
+.pytest_cache/
+.idea/
+.vscode/

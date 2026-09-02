@@ -1,0 +1,20 @@
+[Unit]
+Description=WebAnalytics realtime website log collector
+After=network.target
+Before=nginx.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/www/server/panel/pyenv/bin/python /www/server/panel/plugin/WebAnalytics/scripts/socket_server.py
+Restart=always
+RestartSec=2
+LimitNOFILE=65535
+Environment=PYTHONUNBUFFERED=1
+NoNewPrivileges=true
+PrivateTmp=false
+ProtectHome=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

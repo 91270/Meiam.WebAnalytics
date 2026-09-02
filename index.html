@@ -1,0 +1,66 @@
+<link rel="stylesheet" href="/WebAnalytics/static/css/app.css?v=0.3.7">
+
+<div class="wa-shell" id="wa-app">
+    <aside class="wa-sidebar">
+        <div class="wa-brand">
+            <span class="wa-brand-icon" aria-hidden="true">◎</span>
+            <div><strong>网站访问分析</strong><small>WebAnalytics</small></div>
+        </div>
+        <nav class="wa-nav" aria-label="插件功能">
+            <button class="is-active" data-page="overview"><span>◫</span>概览</button>
+            <button disabled title="阶段 B"><span>▤</span>网站列表<i>待开发</i></button>
+            <button disabled title="阶段 B"><span>⌁</span>蜘蛛统计<i>待开发</i></button>
+            <button disabled title="阶段 B"><span>♙</span>客户端统计<i>待开发</i></button>
+            <button disabled title="阶段 B"><span>⌖</span>IP 统计<i>待开发</i></button>
+            <button disabled title="阶段 B"><span>≋</span>URI 统计<i>待开发</i></button>
+            <button disabled title="阶段 B"><span>!</span>错误日志<i>待开发</i></button>
+            <button disabled title="阶段 B"><span>≡</span>网站日志<i>待开发</i></button>
+            <button disabled title="阶段 B"><span>□</span>统计报告<i>待开发</i></button>
+            <button disabled title="阶段 B"><span>⚙</span>全局设置<i>待开发</i></button>
+        </nav>
+        <div class="wa-author"><span>Developer · Meiam</span><span>Install source · 592.la</span></div>
+    </aside>
+
+    <main class="wa-main">
+        <header class="wa-toolbar">
+            <label>网站
+                <select id="wa-site" aria-label="选择网站"></select>
+            </label>
+            <div class="wa-period" role="group" aria-label="时间范围">
+                <button class="is-active" data-period="today">今日</button>
+                <button data-period="yesterday">昨日</button>
+                <button data-period="7d">近 7 天</button>
+                <button data-period="30d">近 30 天</button>
+            </div>
+            <div class="wa-toolbar-spacer"></div>
+            <span class="wa-health" id="wa-health"><i></i>等待采集</span>
+            <button class="wa-refresh" id="wa-refresh" type="button">↻&nbsp; 刷新</button>
+        </header>
+
+        <section class="wa-content" aria-live="polite">
+            <div class="wa-notice" id="wa-notice" hidden></div>
+            <div class="wa-loading" id="wa-loading"><span></span>正在读取网站统计...</div>
+
+            <div id="wa-dashboard" hidden>
+                <section class="wa-metrics" id="wa-metrics"></section>
+                <section class="wa-chart-card">
+                    <div class="wa-chart-head">
+                        <div>
+                            <h2 id="wa-chart-title">浏览量趋势</h2>
+                            <p>基于 Nginx / Apache 访问日志的分钟级实时统计</p>
+                        </div>
+                        <div class="wa-legend"><span><i class="current"></i>当前时段</span><span><i class="previous"></i>上一时段</span></div>
+                    </div>
+                    <div class="wa-chart" id="wa-chart" role="img" aria-label="访问趋势图"></div>
+                    <div class="wa-chart-tabs" id="wa-chart-tabs"></div>
+                </section>
+                <footer class="wa-footnote">
+                    <span>UV/IP 使用 HLL 低内存近似去重；访客指纹为 IP + User-Agent 哈希</span>
+                    <span id="wa-generated-at">—</span>
+                </footer>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script src="/WebAnalytics/static/js/app.js?v=0.3.7"></script>
