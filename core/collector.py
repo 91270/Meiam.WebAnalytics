@@ -237,6 +237,7 @@ def _run_once_unlocked(config: Optional[Dict[str, object]] = None) -> Dict[str, 
         "rejected": 0,
         "completed_site_ids": [],
         "incomplete_site_ids": [],
+        "site_results": {},
         "errors": [],
     }
     if not bool(config.get("enabled", True)):
@@ -251,6 +252,7 @@ def _run_once_unlocked(config: Optional[Dict[str, object]] = None) -> Dict[str, 
     }
     candidates = []
     for site in discovered:
+        site_id = 0
         try:
             site_id = repository.register_site(site)
             if target_site_ids and site_id not in target_site_ids:
@@ -287,8 +289,25 @@ def _run_once_unlocked(config: Optional[Dict[str, object]] = None) -> Dict[str, 
                 "completed_site_ids" if site_result["complete"] else "incomplete_site_ids"
             )
             summary[completion_key].append(site_id)
+            summary["site_results"][str(site_id)] = {
+                "name": site.name,
+                "log_path": site.log_path,
+                "lines": int(site_result["lines"]),
+                "events": int(site_result["events"]),
+                "rejected": int(site_result["rejected"]),
+                "complete": bool(site_result["complete"]),
+            }
         except Exception as error:  # 单站异常不能阻断其他站点采集
             summary["errors"].append({"site": site.name, "message": str(error)[:500]})
+            summary["site_results"][str(site_id)] = {
+                "name": site.name,
+                "log_path": site.log_path,
+                "lines": 0,
+                "events": 0,
+                "rejected": 0,
+                "complete": False,
+                "error": str(error)[:500],
+            }
 
     summary["finished_at"] = int(time.time())
     repository.set_state("last_run", summary)
@@ -324,6 +343,7 @@ def _run_history_backfill_unlocked(
         "requested_site_ids": sorted(pending),
         "completed_site_ids": [],
         "incomplete_site_ids": sorted(pending),
+        "site_results": {},
         "sites": 0,
         "lines": 0,
         "events": 0,
@@ -352,6 +372,23 @@ def _run_history_backfill_unlocked(
         for key in ("sites", "lines", "events", "rejected"):
             total[key] = int(total[key]) + int(result.get(key, 0))
         total["errors"].extend(result.get("errors", []))
+        for site_id, site_result in result.get("site_results", {}).items():
+            aggregate = total["site_results"].setdefault(
+                str(site_id),
+                {
+                    "name": site_result.get("name", ""),
+                    "log_path": site_result.get("log_path", ""),
+                    "lines": 0,
+                    "events": 0,
+                    "rejected": 0,
+                    "complete": False,
+                },
+            )
+            for key in ("lines", "events", "rejected"):
+                aggregate[key] = int(aggregate[key]) + int(site_result.get(key, 0))
+            aggregate["complete"] = bool(site_result.get("complete", False))
+            if site_result.get("error"):
+                aggregate["error"] = site_result["error"]
         round_completed = {int(value) for value in result["completed_site_ids"]}
         completed.update(round_completed)
         # 一轮的时间预算可能在后续站点开始前就耗尽；未出现在

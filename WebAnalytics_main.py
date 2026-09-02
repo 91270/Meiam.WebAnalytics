@@ -33,7 +33,7 @@ except ImportError:  # 允许本地自动测试导入
 
 def _load_runtime_package():
     """以版本化名称加载核心，避开宝塔常驻进程中残留的 ``core`` 模块。"""
-    package_name = "_webanalytics_runtime_043"
+    package_name = "_webanalytics_runtime_045"
     package_init = PLUGIN_ROOT / "core" / "__init__.py"
     loaded = sys.modules.get(package_name)
     loaded_file = Path(getattr(loaded, "__file__", "")).resolve() if loaded else None
@@ -189,6 +189,7 @@ class WebAnalytics_main:
         internal_site_id = int(site.get("id") or 0)
         received_for_site = int(received_map.get(str(internal_site_id), 0) or 0)
         initial_backfill = service.get("initial_backfill") or {}
+        last_run = health.get("last_run") or {}
         backfill_site_ids = {
             int(value)
             for value in (
@@ -215,6 +216,9 @@ class WebAnalytics_main:
             "extension_include_ready": include_configured,
             "queue": queue_state,
             "config_sync": service.get("config_sync") or {},
+            "history_import": (last_run.get("site_results") or {}).get(
+                str(internal_site_id), {}
+            ),
         }
 
     def get_bootstrap(self, args):

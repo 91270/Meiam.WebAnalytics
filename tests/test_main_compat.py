@@ -32,7 +32,7 @@ class LegacyRepository:
 class MainCompatibilityTests(unittest.TestCase):
     def test_panel_runtime_uses_versioned_module_namespace(self):
         self.assertTrue(
-            main_module.Repository.__module__.startswith("_webanalytics_runtime_043.")
+            main_module.Repository.__module__.startswith("_webanalytics_runtime_045.")
         )
 
     def test_initialization_failure_returns_json_instead_of_http_500(self):
@@ -62,6 +62,20 @@ class MainCompatibilityTests(unittest.TestCase):
                     web_server="nginx",
                 )
             ]
+            repository.set_state(
+                "last_run",
+                {
+                    "site_results": {
+                        "1": {
+                            "log_path": "/www/wwwlogs/api.test.log",
+                            "lines": 120,
+                            "events": 118,
+                            "rejected": 2,
+                            "complete": True,
+                        }
+                    }
+                },
+            )
             with patch(
                 "WebAnalytics.WebAnalytics_main.discover_sites",
                 return_value=discovered,
@@ -69,6 +83,9 @@ class MainCompatibilityTests(unittest.TestCase):
                 response = instance.get_bootstrap({"period": "today"})
             self.assertTrue(response["success"])
             self.assertEqual(response["data"]["sites"][0]["name"], "api.test")
+            self.assertEqual(
+                response["data"]["diagnostics"]["history_import"]["events"], 118
+            )
             json.dumps(response, ensure_ascii=False)
 
             with patch(

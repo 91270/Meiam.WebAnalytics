@@ -10,7 +10,8 @@
         sitesData: null,
         siteQuery: '',
         siteSort: { key: 'requests', direction: 'desc' },
-        loading: false
+        loading: false,
+        refreshTimer: null
     };
 
     var metrics = [
@@ -183,7 +184,7 @@
         $('#wa-chart-title').text(metric.label.replace(/\s*\(.+\)/, '') + '趋势');
 
         if (!trend.length && !previousTrend.length) {
-            $('#wa-chart').html('<div class="wa-empty-chart">暂无统计数据，请访问网站后稍候刷新</div>');
+            $('#wa-chart').html('<div class="wa-empty-chart">所选时间范围暂无可展示的访问数据</div>');
             return;
         }
 
@@ -266,7 +267,7 @@
         if (Number(queue.write_errors || 0) > 0 || Number(queue.dropped || 0) > 0) return badge.addClass('is-warn').html('<i></i>采集队列异常');
         var time = new Date(Number(run.updated_at || 0) * 1000);
         if ((Date.now() - time.getTime()) > 30000) return badge.addClass('is-warn').html('<i></i>实时服务无响应');
-        if (!diagnostics.received_for_site) return badge.addClass('is-warn').html('<i></i>等待网站请求');
+        if (!diagnostics.received_for_site) return badge.addClass('is-warn').html('<i></i>暂无实时请求');
         badge.addClass('is-good').html('<i></i>实时接收中');
     }
 
@@ -275,6 +276,7 @@
         var requests = Number((data.overview || {}).requests || 0);
         var queue = diagnostics.queue || {};
         var sync = diagnostics.config_sync || {};
+        var history = diagnostics.history_import || {};
         if (!diagnostics.service_ready || !diagnostics.socket_ready) {
             var serviceError = ((data.health || {}).realtime_service || {}).error || '';
             showNotice('实时采集服务未正常运行' + (serviceError ? '：' + serviceError : '，当前不会产生新统计数据。'), true);
@@ -289,7 +291,17 @@
         } else if (sync.success === false) {
             showNotice('站点配置自动同步失败：' + (sync.message || '未知原因'), true);
         } else if (!diagnostics.received_for_site && requests === 0) {
-            showNotice('实时服务和站点配置正常，但尚未收到安装或升级后的新请求。若历史日志为空或无法解析，统计会暂时为 0；请访问该网站后刷新。');
+            if (history.error) {
+                showNotice('历史日志初始化失败：' + history.error, true);
+            } else if (Number(history.lines || 0) > 0 && Number(history.events || 0) === 0) {
+                showNotice('历史初始化已读取 ' + formatNumber(history.lines) + ' 行日志，但没有一行符合支持的 Nginx/Apache 访问日志格式。日志路径：' + (history.log_path || '未知'));
+            } else if (Number(history.events || 0) > 0) {
+                showNotice('已从历史日志导入 ' + formatNumber(history.events) + ' 条请求，但当前选择的时间范围内没有数据；可切换“近 7 天”或“近 30 天”查看。');
+            } else if (history.complete) {
+                showNotice('历史日志初始化已完成，但当前日志及轮转日志中没有可解析的完整访问记录。日志路径：' + (history.log_path || '未知'));
+            } else {
+                showNotice('历史日志初始化没有生成数据，请检查站点访问日志是否存在及其格式。');
+            }
         }
     }
 
@@ -302,6 +314,13 @@
         renderChart();
         renderHealth(data.health || {}, data.diagnostics || {});
         renderDiagnostics(data);
+        if (state.refreshTimer) window.clearTimeout(state.refreshTimer);
+        state.refreshTimer = null;
+        if ((data.diagnostics || {}).backfill_for_site) {
+            state.refreshTimer = window.setTimeout(function () {
+                if (state.page === 'overview') loadDashboard(true);
+            }, 3000);
+        }
         $('#wa-generated-at').text('数据生成于 ' + new Date(Number(data.generated_at || Date.now() / 1000) * 1000).toLocaleString('zh-CN'));
         $('#wa-dashboard').prop('hidden', false);
         showPage('overview');
@@ -379,11 +398,13 @@
         showPage('sites');
     }
 
-    function loadDashboard() {
-        setLoading(true, '正在读取网站统计...');
-        showNotice('');
+    function loadDashboard(quiet) {
+        if (!quiet) {
+            setLoading(true, '正在读取网站统计...');
+            showNotice('');
+        }
         requestPlugin('get_bootstrap', { site_id: state.siteId, period: state.period }, function (response) {
-            setLoading(false);
+            if (!quiet) setLoading(false);
             if (!response || !response.success) {
                 showNotice(response && response.message ? response.message : '无法读取插件数据');
                 return;
@@ -476,7 +497,7 @@
                 showNotice(response && response.message ? response.message : '修复失败', true);
                 return;
             }
-            showNotice('采集配置已修复，请访问网站后刷新。');
+            showNotice('采集配置已修复，页面将自动更新采集状态。');
             window.setTimeout(loadDashboard, 1500);
         });
     });
