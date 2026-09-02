@@ -77,6 +77,19 @@ class CollectorTests(unittest.TestCase):
             self.repository.get_overview(self.site_id, start, end)["requests"], 3
         )
 
+        empty_site_id = self.repository.register_site(
+            SiteDefinition(2, "empty.test", "/srv/empty", str(self.root / "empty.test.log"))
+        )
+        summaries = self.repository.get_site_summaries(
+            [self.site_id, empty_site_id], start, end
+        )
+        self.assertEqual(summaries[self.site_id]["requests"], 3)
+        self.assertEqual(summaries[self.site_id]["pv"], 1)
+        self.assertEqual(summaries[self.site_id]["uv"], 2)
+        self.assertEqual(summaries[self.site_id]["ip"], 2)
+        self.assertGreater(summaries[self.site_id]["last_seen"], 0)
+        self.assertEqual(summaries[empty_site_id]["requests"], 0)
+
     def test_rotation_finishes_old_file_then_reads_new_file(self):
         self.log_path.write_text(
             line("192.0.2.1", "01/Sep/2026:11:00:00 +0800", "/first"),

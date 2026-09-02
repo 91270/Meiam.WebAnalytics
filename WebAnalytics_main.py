@@ -33,7 +33,7 @@ except ImportError:  # 允许本地自动测试导入
 
 def _load_runtime_package():
     """以版本化名称加载核心，避开宝塔常驻进程中残留的 ``core`` 模块。"""
-    package_name = "_webanalytics_runtime_039"
+    package_name = "_webanalytics_runtime_040"
     package_init = PLUGIN_ROOT / "core" / "__init__.py"
     loaded = sys.modules.get(package_name)
     loaded_file = Path(getattr(loaded, "__file__", "")).resolve() if loaded else None
@@ -247,7 +247,50 @@ class WebAnalytics_main:
 
     def get_sites(self, args):
         try:
-            return self._ok(self._sync_sites())
+            repository = self._repo()
+            sites = self._sync_sites()
+            period = str(_arg(args, "period", "today"))
+            if period not in {"today", "yesterday", "7d", "30d"}:
+                period = "today"
+            start_ts, end_ts, _bucket = _period_range(period)
+            health = repository.get_health()
+            summaries = repository.get_site_summaries(
+                (int(site["id"]) for site in sites), start_ts, end_ts
+            )
+            result = []
+            for site in sites:
+                site_id = int(site["id"])
+                metrics = summaries.get(site_id, {})
+                diagnostics = self._diagnostics(site, health)
+                if not diagnostics["service_ready"] or not diagnostics["socket_ready"]:
+                    status = {"key": "error", "label": "服务异常"}
+                elif not diagnostics["webserver_configured"]:
+                    status = {"key": "unconfigured", "label": "未接入"}
+                elif diagnostics["received_for_site"] or int(metrics.get("requests") or 0):
+                    status = {"key": "collecting", "label": "采集中"}
+                else:
+                    status = {"key": "waiting", "label": "等待访问"}
+                requests = int(metrics.get("requests") or 0)
+                errors = int(metrics.get("errors") or 0)
+                result.append(
+                    {
+                        "id": site_id,
+                        "panel_site_id": int(site.get("panel_site_id") or 0),
+                        "name": str(site.get("name") or ""),
+                        "web_server": str(site.get("web_server") or "nginx"),
+                        "status": status,
+                        "metrics": metrics,
+                        "error_rate": round(errors * 100.0 / requests, 2) if requests else 0,
+                    }
+                )
+            return self._ok(
+                {
+                    "sites": result,
+                    "period": period,
+                    "range": {"start": start_ts, "end": end_ts},
+                    "generated_at": int(time.time()),
+                }
+            )
         except Exception as error:
             return self._error("读取网站列表失败：{}".format(str(error)[:300]))
 

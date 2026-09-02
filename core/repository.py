@@ -506,6 +506,80 @@ class Repository:
         result["qps"] = round((int(latest["requests"]) / 60.0), 2) if latest else 0
         return result
 
+    def get_site_summaries(
+        self, site_ids: Iterable[int], start_ts: int, end_ts: int
+    ) -> Dict[int, Dict[str, Any]]:
+        """批量读取网站列表指标，避免按站点逐一执行概览查询。"""
+        valid_ids = sorted({int(site_id) for site_id in site_ids if int(site_id) > 0})
+        summaries: Dict[int, Dict[str, Any]] = {
+            site_id: {
+                "requests": 0,
+                "pv": 0,
+                "body_bytes": 0,
+                "errors": 0,
+                "bot_requests": 0,
+                "uv": 0,
+                "ip": 0,
+                "last_seen": 0,
+            }
+            for site_id in valid_ids
+        }
+        if not valid_ids:
+            return summaries
+
+        with self.session() as connection:
+            # 每批不超过 500 个参数，兼容 SQLite 常见的 999 参数上限。
+            for offset in range(0, len(valid_ids), 500):
+                batch = valid_ids[offset : offset + 500]
+                placeholders = ",".join("?" for _ in batch)
+                metric_rows = connection.execute(
+                    """
+                    SELECT site_id, COALESCE(SUM(requests),0) AS requests,
+                           COALESCE(SUM(pv),0) AS pv,
+                           COALESCE(SUM(body_bytes),0) AS body_bytes,
+                           COALESCE(SUM(errors),0) AS errors,
+                           COALESCE(SUM(bot_requests),0) AS bot_requests,
+                           COALESCE(MAX(minute_ts),0) AS last_seen
+                    FROM metric_minute
+                    WHERE site_id IN ({}) AND minute_ts>=? AND minute_ts<?
+                    GROUP BY site_id
+                    """.format(placeholders),
+                    tuple(batch) + (start_ts, end_ts),
+                ).fetchall()
+                for row in metric_rows:
+                    site_id = int(row["site_id"])
+                    summaries[site_id].update(
+                        {
+                            "requests": int(row["requests"] or 0),
+                            "pv": int(row["pv"] or 0),
+                            "body_bytes": int(row["body_bytes"] or 0),
+                            "errors": int(row["errors"] or 0),
+                            "bot_requests": int(row["bot_requests"] or 0),
+                            "last_seen": int(row["last_seen"] or 0),
+                        }
+                    )
+
+                unique_rows = connection.execute(
+                    """SELECT site_id, kind, precision, registers
+                       FROM unique_hll_hour
+                       WHERE site_id IN ({}) AND hour_ts>=? AND hour_ts<?
+                       ORDER BY site_id, kind, hour_ts""".format(placeholders),
+                    tuple(batch) + (start_ts - (start_ts % 3600), end_ts),
+                ).fetchall()
+                sketches: Dict[tuple, HyperLogLog] = {}
+                for row in unique_rows:
+                    key = (int(row["site_id"]), str(row["kind"]))
+                    current = HyperLogLog.loads(
+                        row["registers"], int(row["precision"])
+                    )
+                    if key in sketches:
+                        sketches[key].merge(current)
+                    else:
+                        sketches[key] = current
+                for (site_id, kind), sketch in sketches.items():
+                    summaries[site_id][kind] = sketch.estimate()
+        return summaries
+
     @staticmethod
     def _read_hll_counts(
         connection: sqlite3.Connection, site_id: int, start_ts: int, end_ts: int

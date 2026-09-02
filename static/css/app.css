@@ -63,7 +63,9 @@
 .wa-notice button { margin-left:12px; border:1px solid #d9aa52; border-radius:4px; padding:4px 10px; background:#fff; color:#8e611d; font-size:12px; cursor:pointer; }
 .wa-loading { display:flex; align-items:center; justify-content:center; min-height:520px; color:#8793a3; font-size:13px; }
 .wa-loading span { width:17px; height:17px; margin-right:9px; border:2px solid #dfe5eb; border-top-color:var(--wa-green); border-radius:50%; animation:wa-spin .8s linear infinite; }
+.wa-loading b { font-weight:400; }
 @keyframes wa-spin { to { transform:rotate(360deg); } }
+.wa-page { min-width:0; }
 .wa-metrics { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:8px; }
 .wa-metric { position:relative; min-width:0; min-height:116px; overflow:visible; border:1px solid var(--wa-border); border-radius:7px; padding:16px 12px 13px; background:var(--wa-surface); color:inherit; text-align:left; cursor:pointer; box-shadow:0 1px 2px rgba(29,43,64,.025); transition:border-color .16s,box-shadow .16s,transform .16s; }
 .wa-metric:hover { z-index:5; border-color:#cbd6e1; box-shadow:0 5px 15px rgba(38,54,76,.07); transform:translateY(-1px); }
@@ -115,6 +117,51 @@
 .wa-chart-tabs button.is-active { border-color:#cde9d3; background:var(--wa-green-soft); color:#168c30; font-weight:500; }
 .wa-footnote { display:flex; justify-content:space-between; gap:16px; padding:11px 3px 0; color:#929dac; font-size:11px; line-height:18px; }
 .wa-footnote span:last-child { white-space:nowrap; font-variant-numeric:tabular-nums; }
+.wa-list-head { display:flex; min-height:52px; align-items:flex-start; justify-content:space-between; gap:18px; margin-bottom:12px; }
+.wa-list-head h2 { margin:0; color:#29364a; font-size:16px; font-weight:600; line-height:24px; }
+.wa-list-head p { margin:4px 0 0; color:#8e99a8; font-size:12px; line-height:18px; }
+.wa-list-tools { display:flex; align-items:center; gap:12px; color:#8a95a5; font-size:12px; }
+.wa-search { display:flex; width:210px; height:34px; align-items:center; border:1px solid #d5dde5; border-radius:5px; background:#fff; color:#9aa4b1; transition:border-color .16s,box-shadow .16s; }
+.wa-search:focus-within { border-color:var(--wa-green); box-shadow:0 0 0 3px rgba(32,165,58,.09); }
+.wa-search > span { width:32px; flex:none; font-size:17px; text-align:center; }
+.wa-search input { width:100%; height:32px; min-width:0; border:0; padding:0 10px 0 0; background:transparent; color:#344156; font:inherit; outline:0; }
+.wa-search input::placeholder { color:#a4adba; }
+.wa-table-card { position:relative; min-height:360px; overflow:hidden; border:1px solid var(--wa-border); border-radius:8px; background:#fff; box-shadow:0 2px 8px rgba(34,48,68,.035); }
+.wa-table-scroll { overflow:auto; }
+.wa-table { width:100%; min-width:860px; border-collapse:collapse; table-layout:fixed; color:#4e5b6e; font-size:12px; }
+.wa-table th:nth-child(1) { width:150px; }
+.wa-table th:nth-child(2) { width:85px; }
+.wa-table th:nth-child(3) { width:70px; }
+.wa-table th:nth-child(4), .wa-table th:nth-child(5), .wa-table th:nth-child(6) { width:52px; }
+.wa-table th:nth-child(7) { width:64px; }
+.wa-table th:nth-child(8) { width:75px; }
+.wa-table th:nth-child(9) { width:66px; }
+.wa-table th:nth-child(10) { width:75px; }
+.wa-table th:nth-child(11) { width:80px; }
+.wa-table th { height:44px; border-bottom:1px solid #dfe6ed; padding:0 12px; background:#f8fafc; color:#788496; font-weight:500; text-align:left; white-space:nowrap; }
+.wa-table th button { border:0; padding:0; background:transparent; color:inherit; font:inherit; cursor:pointer; }
+.wa-table th button:hover, .wa-table th button.is-sorted { color:#278c3d; }
+.wa-table th button.is-sorted::after { margin-left:4px; content:attr(data-direction); font-size:9px; }
+.wa-table th.is-number, .wa-table td.is-number { text-align:right; }
+.wa-table th.is-action, .wa-table td.is-action { text-align:center; }
+.wa-table td { height:54px; border-bottom:1px solid #edf1f5; padding:8px 12px; color:#4b586b; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.wa-table tbody tr:last-child td { border-bottom:0; }
+.wa-table tbody tr:hover td { background:#fbfcfd; }
+.wa-site-name { max-width:190px; overflow:hidden; color:#2c394d; font-size:13px; font-weight:500; text-overflow:ellipsis; }
+.wa-site-id { margin-top:2px; color:#a0a9b5; font-size:10px; }
+.wa-status { display:inline-flex; align-items:center; gap:6px; border-radius:12px; padding:3px 8px; background:#f3f5f7; color:#6f7b8b; line-height:18px; }
+.wa-status::before { width:6px; height:6px; border-radius:50%; background:#99a3af; content:""; }
+.wa-status.is-collecting { background:#eef9f1; color:#23853a; }
+.wa-status.is-collecting::before { background:var(--wa-green); }
+.wa-status.is-waiting { background:#f5f7f9; color:#738093; }
+.wa-status.is-unconfigured, .wa-status.is-error { background:#fff6e9; color:#a66b16; }
+.wa-status.is-unconfigured::before, .wa-status.is-error::before { background:#e49b26; }
+.wa-server { display:inline-block; min-width:52px; border:1px solid #dce3e9; border-radius:4px; padding:2px 7px; color:#657287; font-size:10px; text-align:center; text-transform:uppercase; }
+.wa-error-rate.has-errors { color:#d05b55; }
+.wa-last-seen { color:#7f8a9a; }
+.wa-view-site { border:0; padding:4px 5px; background:transparent; color:#24913b; font-size:12px; cursor:pointer; }
+.wa-view-site:hover { color:#137d2a; text-decoration:underline; }
+.wa-table-empty { position:absolute; inset:45px 0 0; display:flex; align-items:center; justify-content:center; color:#929dab; font-size:13px; }
 @media (max-width:1150px) {
     .wa-shell { width:980px; }
     .wa-sidebar { width:146px; }
@@ -127,6 +174,7 @@
     .wa-metrics { gap:6px; }
     .wa-metric { padding-left:9px; padding-right:8px; }
     .wa-metric-value { font-size:20px; }
+    .wa-table th, .wa-table td { padding-left:9px; padding-right:9px; }
 }
 @media (max-width:860px) {
     .wa-metrics { grid-template-columns:repeat(4,minmax(0,1fr)); }
@@ -135,4 +183,6 @@
     .wa-health { margin-left:auto; }
     .wa-chart { height:270px; }
     .wa-footnote { flex-direction:column; gap:2px; }
+    .wa-list-head { align-items:stretch; flex-direction:column; gap:9px; }
+    .wa-list-tools { justify-content:space-between; }
 }

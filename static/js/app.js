@@ -5,7 +5,11 @@
         siteId: 0,
         period: 'today',
         metric: 'pv',
+        page: 'overview',
         data: null,
+        sitesData: null,
+        siteQuery: '',
+        siteSort: { key: 'requests', direction: 'desc' },
         loading: false
     };
 
@@ -83,19 +87,27 @@
         notice.removeAttr('hidden').html(body);
     }
 
-    function setLoading(loading) {
+    function setLoading(loading, message) {
         state.loading = loading;
+        if (message) $('#wa-loading-label').text(message);
         $('#wa-loading').prop('hidden', !loading);
         $('#wa-dashboard').prop('hidden', loading);
         $('#wa-refresh').prop('disabled', loading);
     }
 
-    function renderSites(sites, selected) {
+    function renderSiteOptions(sites, selected) {
         var html = '';
         sites.forEach(function (site) {
             html += '<option value="' + Number(site.id) + '"' + (Number(site.id) === Number(selected) ? ' selected' : '') + '>' + escapeHtml(site.name) + '</option>';
         });
         $('#wa-site').html(html).prop('disabled', !sites.length);
+    }
+
+    function showPage(page) {
+        state.page = page === 'sites' ? 'sites' : 'overview';
+        $('.wa-nav [data-page]').removeClass('is-active').filter('[data-page="' + state.page + '"]').addClass('is-active');
+        $('.wa-page').prop('hidden', true).filter('[data-page="' + state.page + '"]').prop('hidden', false);
+        $('.wa-site-filter').prop('hidden', state.page !== 'overview');
     }
 
     function renderMetrics(data) {
@@ -284,7 +296,7 @@
     function render(data) {
         state.data = data;
         state.siteId = Number(data.selected_site_id || 0);
-        renderSites(data.sites || [], state.siteId);
+        renderSiteOptions(data.sites || [], state.siteId);
         renderMetrics(data);
         renderChartTabs();
         renderChart();
@@ -292,10 +304,83 @@
         renderDiagnostics(data);
         $('#wa-generated-at').text('数据生成于 ' + new Date(Number(data.generated_at || Date.now() / 1000) * 1000).toLocaleString('zh-CN'));
         $('#wa-dashboard').prop('hidden', false);
+        showPage('overview');
+    }
+
+    function siteSortValue(site, key) {
+        if (key === 'name') return String(site.name || '').toLocaleLowerCase('zh-CN');
+        if (key === 'error_rate') return Number(site.error_rate || 0);
+        return Number((site.metrics || {})[key] || 0);
+    }
+
+    function formatLastSeen(timestamp) {
+        var value = Number(timestamp || 0);
+        if (!value) return '暂无数据';
+        var date = new Date(value * 1000);
+        var now = new Date();
+        if (date.toDateString() === now.toDateString()) {
+            return String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
+        }
+        return (date.getMonth() + 1) + '-' + String(date.getDate()).padStart(2, '0') + ' '
+            + String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
+    }
+
+    function renderSitesTable() {
+        var data = state.sitesData || {};
+        var query = String(state.siteQuery || '').trim().toLocaleLowerCase('zh-CN');
+        var sites = (data.sites || []).filter(function (site) {
+            return !query || String(site.name || '').toLocaleLowerCase('zh-CN').indexOf(query) !== -1;
+        });
+        var sort = state.siteSort;
+        sites.sort(function (left, right) {
+            var leftValue = siteSortValue(left, sort.key);
+            var rightValue = siteSortValue(right, sort.key);
+            var result;
+            if (typeof leftValue === 'string') result = leftValue.localeCompare(rightValue, 'zh-CN');
+            else result = leftValue === rightValue ? 0 : (leftValue < rightValue ? -1 : 1);
+            if (!result) result = String(left.name || '').localeCompare(String(right.name || ''), 'zh-CN');
+            return sort.direction === 'asc' ? result : -result;
+        });
+
+        var allowedStatuses = { collecting: true, waiting: true, unconfigured: true, error: true };
+        var html = '';
+        sites.forEach(function (site) {
+            var metrics = site.metrics || {};
+            var status = site.status || {};
+            var statusKey = allowedStatuses[status.key] ? status.key : 'waiting';
+            var errorRate = Number(site.error_rate || 0);
+            var server = String(site.web_server || 'nginx').toLowerCase() === 'apache' ? 'Apache' : 'Nginx';
+            html += '<tr>'
+                + '<td><div class="wa-site-name" title="' + escapeHtml(site.name) + '">' + escapeHtml(site.name) + '</div><div class="wa-site-id">站点 ID ' + Number(site.panel_site_id || 0) + '</div></td>'
+                + '<td><span class="wa-status is-' + statusKey + '">' + escapeHtml(status.label || '等待访问') + '</span></td>'
+                + '<td><span class="wa-server">' + server + '</span></td>'
+                + '<td class="is-number">' + formatNumber(metrics.pv) + '</td>'
+                + '<td class="is-number">' + formatNumber(metrics.uv) + '</td>'
+                + '<td class="is-number">' + formatNumber(metrics.ip) + '</td>'
+                + '<td class="is-number">' + formatNumber(metrics.requests) + '</td>'
+                + '<td class="is-number">' + formatBytes(metrics.body_bytes) + '</td>'
+                + '<td class="is-number wa-error-rate' + (errorRate > 0 ? ' has-errors' : '') + '">' + errorRate.toFixed(2) + '%</td>'
+                + '<td class="wa-last-seen">' + formatLastSeen(metrics.last_seen) + '</td>'
+                + '<td class="is-action"><button class="wa-view-site" data-open-site="' + Number(site.id) + '">查看概览</button></td>'
+                + '</tr>';
+        });
+        $('#wa-sites-body').html(html);
+        $('#wa-sites-empty').prop('hidden', sites.length > 0);
+        $('#wa-site-count').text(sites.length + (sites.length === (data.sites || []).length ? ' 个网站' : ' / ' + (data.sites || []).length + ' 个网站'));
+        $('.wa-table th button[data-sort]').removeClass('is-sorted').removeAttr('data-direction')
+            .filter('[data-sort="' + sort.key + '"]').addClass('is-sorted').attr('data-direction', sort.direction === 'asc' ? '↑' : '↓');
+        $('#wa-sites-generated-at').text('数据生成于 ' + new Date(Number(data.generated_at || Date.now() / 1000) * 1000).toLocaleString('zh-CN'));
+    }
+
+    function renderSitesPage(data) {
+        state.sitesData = data || {};
+        renderSitesTable();
+        $('#wa-dashboard').prop('hidden', false);
+        showPage('sites');
     }
 
     function loadDashboard() {
-        setLoading(true);
+        setLoading(true, '正在读取网站统计...');
         showNotice('');
         requestPlugin('get_bootstrap', { site_id: state.siteId, period: state.period }, function (response) {
             setLoading(false);
@@ -305,7 +390,7 @@
             }
             var data = response.data || {};
             if (!data.sites || !data.sites.length) {
-                renderSites([], 0);
+                renderSiteOptions([], 0);
                 showNotice(response.message || '未发现网站日志。请确认宝塔网站已开启访问日志。');
                 $('#wa-dashboard').prop('hidden', true);
                 return;
@@ -314,15 +399,38 @@
         });
     }
 
+    function loadSites() {
+        setLoading(true, '正在汇总全部网站...');
+        showNotice('');
+        requestPlugin('get_sites', { period: state.period }, function (response) {
+            setLoading(false);
+            if (!response || !response.success) {
+                showNotice(response && response.message ? response.message : '无法读取网站列表');
+                showPage('sites');
+                return;
+            }
+            renderSitesPage(response.data || {});
+        });
+    }
+
     $('#wa-site').on('change', function () {
         state.siteId = Number(this.value || 0);
         loadDashboard();
     });
 
+    $('.wa-nav').on('click', 'button[data-page]', function () {
+        var page = $(this).data('page');
+        if (page === state.page && ((page === 'overview' && state.data) || (page === 'sites' && state.sitesData))) return;
+        showPage(page);
+        if (state.page === 'sites') loadSites();
+        else loadDashboard();
+    });
+
     $('.wa-period').on('click', 'button', function () {
         state.period = $(this).data('period');
         $(this).addClass('is-active').siblings().removeClass('is-active');
-        loadDashboard();
+        if (state.page === 'sites') loadSites();
+        else loadDashboard();
     });
 
     $('#wa-metrics, #wa-chart-tabs').on('click', '[data-metric]', function () {
@@ -333,6 +441,29 @@
     });
 
     $('#wa-refresh').on('click', function () {
+        if (state.page === 'sites') loadSites();
+        else loadDashboard();
+    });
+
+    $('#wa-site-search').on('input', function () {
+        state.siteQuery = this.value || '';
+        renderSitesTable();
+    });
+
+    $('.wa-table').on('click', 'th button[data-sort]', function () {
+        var key = String($(this).data('sort') || 'requests');
+        if (state.siteSort.key === key) {
+            state.siteSort.direction = state.siteSort.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            state.siteSort.key = key;
+            state.siteSort.direction = key === 'name' ? 'asc' : 'desc';
+        }
+        renderSitesTable();
+    });
+
+    $('#wa-sites-body').on('click', '[data-open-site]', function () {
+        state.siteId = Number($(this).data('open-site') || 0);
+        showPage('overview');
         loadDashboard();
     });
 

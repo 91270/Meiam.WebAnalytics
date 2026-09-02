@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="/WebAnalytics/static/css/app.css?v=0.3.9">
+<link rel="stylesheet" href="/WebAnalytics/static/css/app.css?v=0.4.0">
 
 <div class="wa-shell" id="wa-app">
     <aside class="wa-sidebar">
@@ -8,7 +8,7 @@
         </div>
         <nav class="wa-nav" aria-label="插件功能">
             <button class="is-active" data-page="overview"><span>◫</span>概览</button>
-            <button disabled title="阶段 B"><span>▤</span>网站列表<i>待开发</i></button>
+            <button data-page="sites"><span>▤</span>网站列表</button>
             <button disabled title="阶段 B"><span>⌁</span>蜘蛛统计<i>待开发</i></button>
             <button disabled title="阶段 B"><span>♙</span>客户端统计<i>待开发</i></button>
             <button disabled title="阶段 B"><span>⌖</span>IP 统计<i>待开发</i></button>
@@ -23,7 +23,7 @@
 
     <main class="wa-main">
         <header class="wa-toolbar">
-            <label>网站
+            <label class="wa-site-filter">网站
                 <select id="wa-site" aria-label="选择网站"></select>
             </label>
             <div class="wa-period" role="group" aria-label="时间范围">
@@ -39,28 +39,65 @@
 
         <section class="wa-content" aria-live="polite">
             <div class="wa-notice" id="wa-notice" hidden></div>
-            <div class="wa-loading" id="wa-loading"><span></span>正在读取网站统计...</div>
+            <div class="wa-loading" id="wa-loading"><span></span><b id="wa-loading-label">正在读取网站统计...</b></div>
 
             <div id="wa-dashboard" hidden>
-                <section class="wa-metrics" id="wa-metrics"></section>
-                <section class="wa-chart-card">
-                    <div class="wa-chart-head">
-                        <div>
-                            <h2 id="wa-chart-title">浏览量趋势</h2>
-                            <p>基于 Nginx / Apache 访问日志的分钟级实时统计</p>
+                <section class="wa-page" id="wa-overview-page" data-page="overview">
+                    <section class="wa-metrics" id="wa-metrics"></section>
+                    <section class="wa-chart-card">
+                        <div class="wa-chart-head">
+                            <div>
+                                <h2 id="wa-chart-title">浏览量趋势</h2>
+                                <p>基于 Nginx / Apache 访问日志的分钟级实时统计</p>
+                            </div>
+                            <div class="wa-legend"><span><i class="current"></i>当前时段</span><span><i class="previous"></i>上一时段</span></div>
                         </div>
-                        <div class="wa-legend"><span><i class="current"></i>当前时段</span><span><i class="previous"></i>上一时段</span></div>
-                    </div>
-                    <div class="wa-chart" id="wa-chart" role="img" aria-label="访问趋势图"></div>
-                    <div class="wa-chart-tabs" id="wa-chart-tabs"></div>
+                        <div class="wa-chart" id="wa-chart" role="img" aria-label="访问趋势图"></div>
+                        <div class="wa-chart-tabs" id="wa-chart-tabs"></div>
+                    </section>
+                    <footer class="wa-footnote">
+                        <span>UV/IP 使用 HLL 低内存近似去重；访客指纹为 IP + User-Agent 哈希</span>
+                        <span id="wa-generated-at">—</span>
+                    </footer>
                 </section>
-                <footer class="wa-footnote">
-                    <span>UV/IP 使用 HLL 低内存近似去重；访客指纹为 IP + User-Agent 哈希</span>
-                    <span id="wa-generated-at">—</span>
-                </footer>
+
+                <section class="wa-page" id="wa-sites-page" data-page="sites" hidden>
+                    <div class="wa-list-head">
+                        <div><h2>网站列表</h2><p>集中对比全部宝塔站点的核心指标与实时采集状态</p></div>
+                        <div class="wa-list-tools">
+                            <label class="wa-search"><span aria-hidden="true">⌕</span><input id="wa-site-search" type="search" placeholder="搜索网站" autocomplete="off"></label>
+                            <span id="wa-site-count">0 个网站</span>
+                        </div>
+                    </div>
+                    <div class="wa-table-card">
+                        <div class="wa-table-scroll">
+                            <table class="wa-table">
+                                <thead><tr>
+                                    <th><button data-sort="name">网站</button></th>
+                                    <th>采集状态</th>
+                                    <th>Web 服务</th>
+                                    <th class="is-number"><button data-sort="pv">PV</button></th>
+                                    <th class="is-number"><button data-sort="uv">UV</button></th>
+                                    <th class="is-number"><button data-sort="ip">IP</button></th>
+                                    <th class="is-number"><button data-sort="requests">请求</button></th>
+                                    <th class="is-number"><button data-sort="body_bytes">流量</button></th>
+                                    <th class="is-number"><button data-sort="error_rate">错误率</button></th>
+                                    <th>最后数据</th>
+                                    <th class="is-action">操作</th>
+                                </tr></thead>
+                                <tbody id="wa-sites-body"></tbody>
+                            </table>
+                        </div>
+                        <div class="wa-table-empty" id="wa-sites-empty" hidden>没有符合条件的网站</div>
+                    </div>
+                    <footer class="wa-footnote">
+                        <span>列表指标采用顶部所选时间范围；点击列名可排序</span>
+                        <span id="wa-sites-generated-at">—</span>
+                    </footer>
+                </section>
             </div>
         </section>
     </main>
 </div>
 
-<script src="/WebAnalytics/static/js/app.js?v=0.3.9"></script>
+<script src="/WebAnalytics/static/js/app.js?v=0.4.0"></script>
