@@ -37,8 +37,7 @@
 .wa-nav button.is-active { background:#fff; color:var(--wa-green); font-weight:600; }
 .wa-nav button.is-active::before { position:absolute; inset:0 auto 0 0; width:3px; background:var(--wa-green); content:""; }
 .wa-nav button.is-active > span { color:var(--wa-green); }
-.wa-author { position:absolute; left:0; right:0; bottom:14px; color:#99a3b1; font-size:10px; line-height:17px; text-align:center; }
-.wa-author span { display:block; }
+.wa-author { position:absolute; left:0; right:0; bottom:16px; color:#99a3b1; font-size:10px; line-height:17px; text-align:center; }
 .wa-main { display:flex; min-width:0; height:100%; flex:1; flex-direction:column; }
 .wa-toolbar { display:flex; align-items:center; gap:14px; height:68px; flex:none; padding:0 18px; border-bottom:1px solid var(--wa-border); background:#fff; }
 .wa-toolbar label { display:flex; align-items:center; gap:9px; color:#606d80; font-size:13px; font-weight:500; }
