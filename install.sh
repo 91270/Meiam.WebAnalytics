@@ -12,7 +12,6 @@ data_path="${persistent_root}/data"
 panel_python="/www/server/panel/pyenv/bin/python"
 service_name="webanalytics.service"
 service_file="/etc/systemd/system/${service_name}"
-backup_root="/www/backup/plugin/${plugin_name}"
 
 migrate_persistent_data() {
     mkdir -p "${data_path}"
@@ -59,10 +58,9 @@ Install() {
     migrate_persistent_data
     chmod 700 "${plugin_path}/scripts/collect.py" "${plugin_path}/scripts/init_db.py" \
         "${plugin_path}/scripts/socket_server.py" "${plugin_path}/scripts/configure_nginx.py" \
-        "${plugin_path}/scripts/bootstrap_data.py" "${plugin_path}/scripts/restore_data.py"
-    "${panel_python}" "${plugin_path}/scripts/restore_data.py" || exit 1
+        "${plugin_path}/scripts/bootstrap_data.py"
     "${panel_python}" "${plugin_path}/scripts/init_db.py" || exit 1
-    echo "正在恢复并补齐已有网站日志统计..."
+    echo "正在从服务器现存网站日志初始化历史统计..."
     "${panel_python}" "${plugin_path}/scripts/bootstrap_data.py" || \
         echo "历史数据预热未完成，实时采集仍将继续运行"
     rm -f /etc/cron.d/webanalytics /etc/cron.d/webanalytics.tmp
@@ -84,8 +82,6 @@ Update() {
         systemctl stop "${service_name}" >/dev/null 2>&1 || true
     fi
     migrate_persistent_data
-    chmod 700 "${plugin_path}/scripts/restore_data.py"
-    "${panel_python}" "${plugin_path}/scripts/restore_data.py" || exit 1
     "${panel_python}" "${plugin_path}/scripts/init_db.py" || exit 1
     chmod 700 "${plugin_path}/scripts/bootstrap_data.py"
     echo "正在检查未补录网站..."
@@ -107,15 +103,9 @@ Uninstall() {
         systemctl daemon-reload
     fi
     rm -f /etc/cron.d/webanalytics /etc/cron.d/webanalytics.tmp /tmp/webanalytics.sock
-    if [ -d "${data_path}" ]; then
-        timestamp="$(date +%Y%m%d-%H%M%S)"
-        backup_path="${backup_root}/${timestamp}"
-        mkdir -p "${backup_path}"
-        cp -a "${data_path}/." "${backup_path}/"
-        echo "统计数据已备份到 ${backup_path}"
-    fi
     rm -rf "${plugin_path}"
-    echo "卸载完成，统计数据库保留在 ${data_path}，原始网站日志未被修改"
+    rm -rf "${persistent_root}"
+    echo "卸载完成，统计数据库已删除；原始网站日志未被修改，重装时将据此重建"
 }
 
 case "${1:-}" in
