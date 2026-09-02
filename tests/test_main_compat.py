@@ -32,7 +32,7 @@ class LegacyRepository:
 class MainCompatibilityTests(unittest.TestCase):
     def test_panel_runtime_uses_versioned_module_namespace(self):
         self.assertTrue(
-            main_module.Repository.__module__.startswith("_webanalytics_runtime_047.")
+            main_module.Repository.__module__.startswith("_webanalytics_runtime_048.")
         )
 
     def test_initialization_failure_returns_json_instead_of_http_500(self):

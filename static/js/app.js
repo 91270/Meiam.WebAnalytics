@@ -10,8 +10,7 @@
         sitesData: null,
         siteQuery: '',
         siteSort: { key: 'requests', direction: 'desc' },
-        loading: false,
-        refreshTimer: null
+        loading: false
     };
 
     var metrics = [
@@ -314,13 +313,6 @@
         renderChart();
         renderHealth(data.health || {}, data.diagnostics || {});
         renderDiagnostics(data);
-        if (state.refreshTimer) window.clearTimeout(state.refreshTimer);
-        state.refreshTimer = null;
-        if ((data.diagnostics || {}).backfill_for_site) {
-            state.refreshTimer = window.setTimeout(function () {
-                if (state.page === 'overview') loadDashboard(true);
-            }, 3000);
-        }
         $('#wa-generated-at').text('数据生成于 ' + new Date(Number(data.generated_at || Date.now() / 1000) * 1000).toLocaleString('zh-CN'));
         $('#wa-dashboard').prop('hidden', false);
         showPage('overview');
@@ -398,13 +390,11 @@
         showPage('sites');
     }
 
-    function loadDashboard(quiet) {
-        if (!quiet) {
-            setLoading(true, '正在读取网站统计...');
-            showNotice('');
-        }
+    function loadDashboard() {
+        setLoading(true, '正在读取网站统计...');
+        showNotice('');
         requestPlugin('get_bootstrap', { site_id: state.siteId, period: state.period }, function (response) {
-            if (!quiet) setLoading(false);
+            setLoading(false);
             if (!response || !response.success) {
                 showNotice(response && response.message ? response.message : '无法读取插件数据');
                 return;
@@ -497,7 +487,7 @@
                 showNotice(response && response.message ? response.message : '修复失败', true);
                 return;
             }
-            showNotice('采集配置已修复，页面将自动更新采集状态。');
+            showNotice('采集配置已修复，可点击右上角“刷新”查看最新状态。');
             window.setTimeout(loadDashboard, 1500);
         });
     });
