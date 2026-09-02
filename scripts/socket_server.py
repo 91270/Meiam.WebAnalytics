@@ -84,6 +84,7 @@ def main():
             backfill_config = dict(config)
             backfill_config["collect_from_end"] = False
             backfill_config["only_sites_without_statistics"] = True
+            backfill_config["force_tail_backfill"] = True
             result = run_once(backfill_config)
             result["status"] = "complete"
             result["requested_site_ids"] = sorted(site_ids)

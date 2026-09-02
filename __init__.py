@@ -1,3 +1,3 @@
 """WebAnalytics 宝塔 Linux 面板插件。"""
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"

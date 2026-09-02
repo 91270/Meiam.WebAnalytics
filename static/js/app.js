@@ -289,7 +289,7 @@
         } else if (sync.success === false) {
             showNotice('站点配置自动同步失败：' + (sync.message || '未知原因'), true);
         } else if (!diagnostics.received_for_site && requests === 0) {
-            showNotice('实时服务和 Nginx 配置正常，但尚未收到当前网站请求。请访问该网站后刷新；若仍为 0，可修复采集配置。', true);
+            showNotice('实时服务和站点配置正常，但尚未收到安装或升级后的新请求。若历史日志为空或无法解析，统计会暂时为 0；请访问该网站后刷新。');
         }
     }
 

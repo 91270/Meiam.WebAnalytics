@@ -100,6 +100,10 @@ def collect_site(
         return result
 
     cursor = repository.get_cursor(site_id)
+    if bool(config.get("force_tail_backfill", False)):
+        # 早期版本可能在未生成任何指标前就把游标保存到文件末尾。
+        # 对明确判定为“无统计”的预热任务忽略该旧游标，重新读取受限日志尾部。
+        cursor = None
     if cursor is None and bool(config.get("collect_from_end", True)):
         stat = canonical.stat()
         repository.save_cursor(site_id, str(canonical), _stat_cursor(canonical, stat.st_size))

@@ -6,7 +6,12 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from WebAnalytics.core.collector import _read_batches, _run_once_unlocked, collect_site
+from WebAnalytics.core.collector import (
+    _read_batches,
+    _run_once_unlocked,
+    _stat_cursor,
+    collect_site,
+)
 from WebAnalytics.core.repository import Repository
 from WebAnalytics.core.site_discovery import SiteDefinition
 
@@ -97,11 +102,17 @@ class CollectorTests(unittest.TestCase):
             encoding="utf-8",
         )
         empty_site = SiteDefinition(2, "empty.test", "/srv/empty", str(empty_log))
+        self.repository.save_cursor(
+            empty_site_id,
+            str(empty_log),
+            _stat_cursor(empty_log, empty_log.stat().st_size),
+        )
         backfill_config = dict(self.config)
         backfill_config.update(
             {
                 "collect_from_end": False,
                 "only_sites_without_statistics": True,
+                "force_tail_backfill": True,
                 "run_budget_seconds": 5,
             }
         )

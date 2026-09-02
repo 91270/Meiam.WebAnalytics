@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import re
 import sqlite3
 import sys
 from dataclasses import dataclass
@@ -40,6 +41,55 @@ def _web_server(site_name: str) -> str:
     return "nginx"
 
 
+def _configured_log_path(log_dir: Path, site_name: str, web_server: str) -> Path:
+    """优先读取站点真实日志路径；只接受配置日志目录内的普通路径。"""
+    safe_name = Path(site_name).name
+    vhost_dir = APACHE_VHOST_DIR if web_server == "apache" else NGINX_VHOST_DIR
+    vhost_path = vhost_dir / (safe_name + ".conf")
+    candidates = []
+    try:
+        content = vhost_path.read_text(encoding="utf-8", errors="replace")
+        if web_server == "apache":
+            values = re.findall(
+                r"(?im)^\s*CustomLog\s+(?:\"([^\"]+)\"|'([^']+)'|(\S+))",
+                content,
+            )
+            raw_paths = [next((item for item in match if item), "") for match in values]
+        else:
+            values = re.findall(
+                r"(?im)^\s*access_log\s+(?:\"([^\"]+)\"|'([^']+)'|(\S+))",
+                content,
+            )
+            raw_paths = [next((item for item in match if item), "") for match in values]
+        allowed_root = log_dir.resolve()
+        for raw_path in raw_paths:
+            if (
+                not raw_path
+                or raw_path.lower() == "off"
+                or raw_path.startswith("syslog:")
+                or "$" in raw_path
+            ):
+                continue
+            path = Path(raw_path)
+            candidate = (path if path.is_absolute() else allowed_root / path).resolve()
+            try:
+                candidate.relative_to(allowed_root)
+            except ValueError:
+                continue
+            candidates.append(candidate)
+    except OSError:
+        candidates = []
+    if candidates:
+        expected_names = {safe_name + ".log", safe_name + "-access_log"}
+        candidates.sort(key=lambda path: (path.name not in expected_names, str(path)))
+        return candidates[0]
+    return (
+        (log_dir / (safe_name + "-access_log")).resolve()
+        if web_server == "apache"
+        else _safe_log_candidate(log_dir, safe_name)
+    )
+
+
 def _from_rows(rows: Iterable[Any], log_dir: Path) -> List[SiteDefinition]:
     sites: List[SiteDefinition] = []
     for row in rows:
@@ -56,11 +106,7 @@ def _from_rows(rows: Iterable[Any], log_dir: Path) -> List[SiteDefinition]:
         if not name or panel_site_id <= 0:
             continue
         web_server = _web_server(name)
-        candidate = (
-            (log_dir / (Path(name).name + "-access_log")).resolve()
-            if web_server == "apache"
-            else _safe_log_candidate(log_dir, name)
-        )
+        candidate = _configured_log_path(log_dir, name, web_server)
         sites.append(
             SiteDefinition(
                 panel_site_id=panel_site_id,

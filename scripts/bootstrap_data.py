@@ -20,6 +20,7 @@ if __name__ == "__main__":
     config = dict(load_config())
     config["collect_from_end"] = False
     config["only_sites_without_statistics"] = True
+    config["force_tail_backfill"] = True
     config["run_budget_seconds"] = min(
         30, max(5, int(config.get("run_budget_seconds", 30)))
     )

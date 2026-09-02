@@ -33,7 +33,7 @@ except ImportError:  # 允许本地自动测试导入
 
 def _load_runtime_package():
     """以版本化名称加载核心，避开宝塔常驻进程中残留的 ``core`` 模块。"""
-    package_name = "_webanalytics_runtime_041"
+    package_name = "_webanalytics_runtime_042"
     package_init = PLUGIN_ROOT / "core" / "__init__.py"
     loaded = sys.modules.get(package_name)
     loaded_file = Path(getattr(loaded, "__file__", "")).resolve() if loaded else None
@@ -164,13 +164,22 @@ class WebAnalytics_main:
         expected_tag = "tag=wa_{}_access".format(panel_site_id)
         if web_server == "apache":
             expected_tag = "wa_{}_access".format(panel_site_id)
-        configured = False
+        extension_configured = False
+        include_configured = False
         try:
-            configured = panel_site_id > 0 and expected_tag in extension_path.read_text(
+            extension_configured = panel_site_id > 0 and expected_tag in extension_path.read_text(
                 encoding="utf-8", errors="replace"
             )
         except OSError:
-            configured = False
+            extension_configured = False
+        try:
+            vhost_content = vhost_path.read_text(encoding="utf-8", errors="replace")
+            normalized_vhost = vhost_content.replace("\\", "/")
+            include_marker = "/extension/{}/".format(safe_name)
+            include_configured = include_marker in normalized_vhost
+        except OSError:
+            include_configured = False
+        configured = extension_configured and include_configured
 
         service = health.get("realtime_service") or {}
         updated_at = int(service.get("updated_at") or 0)
@@ -202,6 +211,8 @@ class WebAnalytics_main:
             ),
             "vhost": str(vhost_path),
             "extension": str(extension_path),
+            "extension_file_ready": extension_configured,
+            "extension_include_ready": include_configured,
             "queue": queue_state,
             "config_sync": service.get("config_sync") or {},
         }
