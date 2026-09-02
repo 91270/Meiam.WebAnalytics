@@ -10,7 +10,9 @@
         sitesData: null,
         siteQuery: '',
         siteSort: { key: 'requests', direction: 'desc' },
-        loading: false
+        loading: false,
+        dashboardRequest: 0,
+        siteOptionsSignature: ''
     };
 
     var metrics = [
@@ -96,11 +98,19 @@
     }
 
     function renderSiteOptions(sites, selected) {
-        var html = '';
-        sites.forEach(function (site) {
-            html += '<option value="' + Number(site.id) + '"' + (Number(site.id) === Number(selected) ? ' selected' : '') + '>' + escapeHtml(site.name) + '</option>';
-        });
-        $('#wa-site').html(html).prop('disabled', !sites.length);
+        var signature = sites.map(function (site) {
+            return Number(site.id) + ':' + String(site.name || '');
+        }).join('|');
+        var select = $('#wa-site');
+        if (signature !== state.siteOptionsSignature) {
+            var html = '';
+            sites.forEach(function (site) {
+                html += '<option value="' + Number(site.id) + '">' + escapeHtml(site.name) + '</option>';
+            });
+            select.html(html);
+            state.siteOptionsSignature = signature;
+        }
+        select.val(String(Number(selected || 0))).prop('disabled', !sites.length);
     }
 
     function showPage(page) {
@@ -280,7 +290,7 @@
             var serviceError = ((data.health || {}).realtime_service || {}).error || '';
             showNotice('实时采集服务未正常运行' + (serviceError ? '：' + serviceError : '，当前不会产生新统计数据。'), true);
         } else if (diagnostics.backfill_for_site) {
-            showNotice('正在从当前及轮转访问日志恢复完整历史数据；已完成部分会立即显示。');
+            showNotice('正在从当前及轮转访问日志恢复完整历史数据；点击右上角“刷新”可查看已完成部分。');
         } else if (!diagnostics.webserver_configured && !diagnostics.nginx_configured) {
             showNotice('当前网站尚未写入 ' + (diagnostics.web_server === 'apache' ? 'Apache' : 'Nginx') + ' 实时日志扩展配置。', true);
         } else if (Number(queue.write_errors || 0) > 0) {
@@ -391,9 +401,11 @@
     }
 
     function loadDashboard() {
+        var requestId = ++state.dashboardRequest;
         setLoading(true, '正在读取网站统计...');
         showNotice('');
         requestPlugin('get_bootstrap', { site_id: state.siteId, period: state.period }, function (response) {
+            if (requestId !== state.dashboardRequest) return;
             setLoading(false);
             if (!response || !response.success) {
                 showNotice(response && response.message ? response.message : '无法读取插件数据');
@@ -411,6 +423,7 @@
     }
 
     function loadSites() {
+        state.dashboardRequest += 1;
         setLoading(true, '正在汇总全部网站...');
         showNotice('');
         requestPlugin('get_sites', { period: state.period }, function (response) {
