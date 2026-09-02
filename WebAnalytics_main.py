@@ -33,7 +33,7 @@ except ImportError:  # 允许本地自动测试导入
 
 def _load_runtime_package():
     """以版本化名称加载核心，避开宝塔常驻进程中残留的 ``core`` 模块。"""
-    package_name = "_webanalytics_runtime_040"
+    package_name = "_webanalytics_runtime_041"
     package_init = PLUGIN_ROOT / "core" / "__init__.py"
     loaded = sys.modules.get(package_name)
     loaded_file = Path(getattr(loaded, "__file__", "")).resolve() if loaded else None
@@ -179,6 +179,16 @@ class WebAnalytics_main:
         queue_state = service.get("queue") or {}
         internal_site_id = int(site.get("id") or 0)
         received_for_site = int(received_map.get(str(internal_site_id), 0) or 0)
+        initial_backfill = service.get("initial_backfill") or {}
+        backfill_site_ids = {
+            int(value)
+            for value in (
+                initial_backfill.get("site_ids")
+                or initial_backfill.get("requested_site_ids")
+                or []
+            )
+            if str(value).lstrip("-").isdigit()
+        }
         return {
             "socket_ready": socket_ready,
             "service_ready": service_ready,
@@ -186,6 +196,10 @@ class WebAnalytics_main:
             "webserver_configured": configured,
             "web_server": web_server,
             "received_for_site": received_for_site,
+            "backfill_for_site": (
+                service.get("phase") == "backfill"
+                and internal_site_id in backfill_site_ids
+            ),
             "vhost": str(vhost_path),
             "extension": str(extension_path),
             "queue": queue_state,

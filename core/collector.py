@@ -159,6 +159,7 @@ def _run_once_unlocked(config: Optional[Dict[str, object]] = None) -> Dict[str, 
     summary: Dict[str, object] = {
         "started_at": started,
         "finished_at": started,
+        "discovered_sites": 0,
         "sites": 0,
         "lines": 0,
         "events": 0,
@@ -169,15 +170,34 @@ def _run_once_unlocked(config: Optional[Dict[str, object]] = None) -> Dict[str, 
         repository.set_state("last_run", summary)
         return summary
 
+    discovered = list(discover_sites(config))
+    summary["discovered_sites"] = len(discovered)
+    only_missing = bool(config.get("only_sites_without_statistics", False))
+    candidates = []
+    for site in discovered:
+        try:
+            site_id = repository.register_site(site)
+            if only_missing and repository.has_site_statistics(site_id):
+                continue
+            candidates.append((site_id, site))
+        except Exception as error:
+            summary["errors"].append({"site": site.name, "message": str(error)[:500]})
+
     budget = max(5, min(300, int(config.get("run_budget_seconds", 45))))
     deadline = time.monotonic() + budget
-    for site in discover_sites(config):
+    for index, (site_id, site) in enumerate(candidates):
         if time.monotonic() >= deadline:
             break
         try:
-            site_id = repository.register_site(site)
             summary["sites"] = int(summary["sites"]) + 1
-            site_result = collect_site(repository, site_id, site, config, deadline)
+            # 把剩余时间公平分给尚未处理的站点，避免首个大日志独占补录预算。
+            remaining_sites = max(1, len(candidates) - index)
+            remaining_seconds = max(0.0, deadline - time.monotonic())
+            site_deadline = min(
+                deadline,
+                time.monotonic() + max(0.25, remaining_seconds / remaining_sites),
+            )
+            site_result = collect_site(repository, site_id, site, config, site_deadline)
             for key in ("lines", "events", "rejected"):
                 summary[key] = int(summary[key]) + site_result[key]
         except Exception as error:  # 单站异常不能阻断其他站点采集

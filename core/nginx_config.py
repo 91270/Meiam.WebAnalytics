@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -193,7 +194,30 @@ def _restore(originals: Dict[Path, Optional[bytes]]) -> None:
             path.write_bytes(original)
 
 
-def configure_all(enable: bool) -> Dict[str, object]:
+@contextmanager
+def _configuration_lock():
+    """串行化安装脚本、常驻服务和面板修复触发的配置同步。"""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    handle = (DATA_DIR / "configure.lock").open("a+")
+    try:
+        try:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        except ImportError:
+            pass
+        yield
+    finally:
+        try:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        except (ImportError, OSError):
+            pass
+        handle.close()
+
+
+def _configure_all_locked(enable: bool) -> Dict[str, object]:
     config = load_config()
     sites = [site for site in discover_sites(config) if site.panel_site_id > 0]
     backup_dir = DATA_DIR / "webserver-backups" / time.strftime("%Y%m%d-%H%M%S")
@@ -282,3 +306,8 @@ def configure_all(enable: bool) -> Dict[str, object]:
     except Exception:
         _restore(originals)
         raise
+
+
+def configure_all(enable: bool) -> Dict[str, object]:
+    with _configuration_lock():
+        return _configure_all_locked(enable)

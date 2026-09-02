@@ -4,8 +4,9 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
-from WebAnalytics.core.collector import _read_batches, collect_site
+from WebAnalytics.core.collector import _read_batches, _run_once_unlocked, collect_site
 from WebAnalytics.core.repository import Repository
 from WebAnalytics.core.site_discovery import SiteDefinition
 
@@ -89,6 +90,36 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(summaries[self.site_id]["ip"], 2)
         self.assertGreater(summaries[self.site_id]["last_seen"], 0)
         self.assertEqual(summaries[empty_site_id]["requests"], 0)
+
+        empty_log = self.root / "empty.test.log"
+        empty_log.write_text(
+            line("198.51.100.8", "01/Sep/2026:10:23:30 +0800", "/new-site"),
+            encoding="utf-8",
+        )
+        empty_site = SiteDefinition(2, "empty.test", "/srv/empty", str(empty_log))
+        backfill_config = dict(self.config)
+        backfill_config.update(
+            {
+                "collect_from_end": False,
+                "only_sites_without_statistics": True,
+                "run_budget_seconds": 5,
+            }
+        )
+        with patch(
+            "WebAnalytics.core.collector.Repository", return_value=self.repository
+        ), patch(
+            "WebAnalytics.core.collector.discover_sites",
+            return_value=[self.site, empty_site],
+        ):
+            backfill = _run_once_unlocked(backfill_config)
+        self.assertEqual(backfill["discovered_sites"], 2)
+        self.assertEqual(backfill["sites"], 1)
+        self.assertEqual(
+            self.repository.get_overview(empty_site_id, start, end)["requests"], 1
+        )
+        self.assertEqual(
+            self.repository.get_overview(self.site_id, start, end)["requests"], 3
+        )
 
     def test_rotation_finishes_old_file_then_reads_new_file(self):
         self.log_path.write_text(

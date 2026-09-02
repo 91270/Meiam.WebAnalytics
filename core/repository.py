@@ -476,6 +476,14 @@ class Repository:
             ).fetchone()
         return row is not None
 
+    def has_site_statistics(self, site_id: int) -> bool:
+        """判断指定站点是否已有聚合数据，不能用全库状态代替。"""
+        with self.session() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM metric_minute WHERE site_id=? LIMIT 1", (int(site_id),)
+            ).fetchone()
+        return row is not None
+
     def get_overview(self, site_id: int, start_ts: int, end_ts: int) -> Dict[str, Any]:
         with self.session() as connection:
             totals = connection.execute(

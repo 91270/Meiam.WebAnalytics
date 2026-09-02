@@ -74,20 +74,19 @@ def main():
     processor = RealtimeQueue(repository, config)
     processor.start()
     mapping = site_mapping(repository, config)
-    needs_backfill = not repository.has_statistics()
-    backfill_state = (
-        {"status": "running", "started_at": int(time.time())}
-        if needs_backfill
-        else {"status": "skipped", "reason": "database already has statistics"}
-    )
+    backfill_state = {"status": "skipped", "reason": "all sites already have statistics"}
+    backfill_thread = None
+    attempted_backfill_sites = set()
 
-    def initial_backfill():
+    def initial_backfill(site_ids):
         nonlocal backfill_state
         try:
             backfill_config = dict(config)
             backfill_config["collect_from_end"] = False
+            backfill_config["only_sites_without_statistics"] = True
             result = run_once(backfill_config)
             result["status"] = "complete"
+            result["requested_site_ids"] = sorted(site_ids)
             backfill_state = result
         except Exception as error:
             backfill_state = {
@@ -97,27 +96,59 @@ def main():
                 "finished_at": int(time.time()),
             }
 
-    backfill_thread = None
-    if needs_backfill:
+    def schedule_missing_backfill():
+        nonlocal backfill_thread, backfill_state
+        if backfill_thread is not None and backfill_thread.is_alive():
+            return
+        missing = {
+            int(site_id)
+            for site_id in mapping.values()
+            if not repository.has_site_statistics(int(site_id))
+            and int(site_id) not in attempted_backfill_sites
+        }
+        if not missing:
+            return
+        attempted_backfill_sites.update(missing)
+        backfill_state = {
+            "status": "running",
+            "started_at": int(time.time()),
+            "site_ids": sorted(missing),
+        }
         backfill_thread = threading.Thread(
             target=initial_backfill,
+            args=(missing,),
             name="webanalytics-initial-backfill",
             daemon=True,
         )
         backfill_thread.start()
+
+    try:
+        startup_config_sync = configure_all(True)
+        sync_state = {
+            "success": True,
+            "updated_at": int(time.time()),
+            "changed_sites": startup_config_sync.get("changed_sites", []),
+            "message": "service startup sync",
+        }
+    except Exception as error:
+        sync_state = {
+            "success": False,
+            "updated_at": int(time.time()),
+            "message": str(error)[:500],
+        }
+    schedule_missing_backfill()
     received_by_site = defaultdict(int)
     received = 0
     rejected = 0
     last_received = 0
     last_health = 0.0
     last_sync = time.monotonic()
-    sync_state = {"success": True, "updated_at": int(time.time()), "message": "service start"}
 
     repository.set_state(
         "realtime_service",
         {
             "running": True,
-            "phase": "backfill" if needs_backfill else "running",
+            "phase": "backfill" if backfill_state.get("status") == "running" else "running",
             "pid": os.getpid(),
             "socket": str(SOCKET_PATH),
             "initial_backfill": backfill_state,
@@ -153,12 +184,13 @@ def main():
                 pass
 
             now = time.monotonic()
-            sync_interval = max(30, min(3600, int(config.get("config_sync_seconds", 60))))
+            sync_interval = max(10, min(3600, int(config.get("config_sync_seconds", 15))))
             if now - last_sync >= sync_interval:
                 try:
                     config = load_config()
                     mapping = site_mapping(repository, config)
                     result = configure_all(True)
+                    schedule_missing_backfill()
                     sync_state = {
                         "success": True,
                         "updated_at": int(time.time()),

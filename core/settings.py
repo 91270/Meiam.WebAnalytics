@@ -42,7 +42,7 @@ DEFAULTS: Dict[str, Any] = {
     "queue_size": 20000,
     "flush_size": 500,
     "flush_interval_seconds": 1.0,
-    "config_sync_seconds": 60,
+    "config_sync_seconds": 15,
     "hll_precision": 10,
     "trusted_proxy_cidrs": [
         "127.0.0.0/8",
@@ -111,10 +111,18 @@ def load_config() -> Dict[str, Any]:
         except (OSError, ValueError):
             current = {}
 
+    migrated = False
+    if current.get("config_sync_seconds") == 60:
+        # 0.4.0 及更早版本的内部默认值；缩短新增站点自动接入等待。
+        current["config_sync_seconds"] = 15
+        migrated = True
+
     config = dict(DEFAULTS)
     config.update(current)
     if not config.get("privacy_salt"):
         config["privacy_salt"] = secrets.token_hex(32)
+        _atomic_write_json(CONFIG_PATH, config)
+    elif migrated:
         _atomic_write_json(CONFIG_PATH, config)
     elif config != current and not CONFIG_PATH.exists():
         _atomic_write_json(CONFIG_PATH, config)
