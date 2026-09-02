@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import gzip
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
 from WebAnalytics.core.collector import (
+    _history_files,
     _read_batches,
+    _run_history_backfill_unlocked,
     _run_once_unlocked,
     _stat_cursor,
     collect_site,
@@ -172,6 +175,85 @@ class CollectorTests(unittest.TestCase):
         self.log_path.write_bytes(b"first-line\nsecond-line\nthird-line\n")
         batches = list(_read_batches(self.log_path, 3, 100, True))
         self.assertEqual(batches[0][0], ["second-line\n", "third-line\n"])
+
+    def test_full_history_reads_rotated_gzip_and_current_logs_once(self):
+        rotated_plain = self.root / "example.test.log.2"
+        rotated_gzip = self.root / "example.test.log.1.gz"
+        rotated_plain.write_text(
+            line("192.0.2.1", "31/Aug/2026:23:59:00 +0800", "/old"),
+            encoding="utf-8",
+        )
+        with gzip.open(str(rotated_gzip), "wt", encoding="utf-8") as stream:
+            stream.write(line("192.0.2.2", "01/Sep/2026:00:01:00 +0800", "/gzip"))
+        self.log_path.write_text(
+            line("192.0.2.3", "01/Sep/2026:00:02:00 +0800", "/current"),
+            encoding="utf-8",
+        )
+        # 文件名不是可靠时间顺序，采集器使用 mtime，并始终把当前文件放最后。
+        paths = _history_files(self.log_path)
+        self.assertEqual(paths[-1], self.log_path)
+
+        config = dict(self.config)
+        config["full_history"] = True
+        first = collect_site(
+            self.repository, self.site_id, self.site, config, float("inf")
+        )
+        self.assertTrue(first["complete"])
+        self.assertEqual(first["events"], 3)
+        second = collect_site(
+            self.repository, self.site_id, self.site, config, float("inf")
+        )
+        self.assertEqual(second["events"], 0)
+
+        start = int(datetime.fromisoformat("2026-08-31T00:00:00+08:00").timestamp())
+        overview = self.repository.get_overview(self.site_id, start, start + 172800)
+        self.assertEqual(overview["requests"], 3)
+
+    def test_history_backfill_keeps_targets_not_reached_in_previous_round(self):
+        second_log = self.root / "second.test.log"
+        second_log.write_text(
+            line("198.51.100.2", "01/Sep/2026:01:00:00 +0800", "/second"),
+            encoding="utf-8",
+        )
+        second_site = SiteDefinition(2, "second.test", "/srv/second", str(second_log))
+        calls = []
+
+        def fake_round(config):
+            targets = list(config["target_site_ids"])
+            calls.append(targets)
+            if len(calls) == 1:
+                return {
+                    "sites": 1,
+                    "lines": 1,
+                    "events": 1,
+                    "rejected": 0,
+                    "completed_site_ids": [targets[0]],
+                    "incomplete_site_ids": [],
+                    "errors": [],
+                }
+            return {
+                "sites": 1,
+                "lines": 1,
+                "events": 1,
+                "rejected": 0,
+                "completed_site_ids": targets,
+                "incomplete_site_ids": [],
+                "errors": [],
+            }
+
+        with patch(
+            "WebAnalytics.core.collector.Repository", return_value=self.repository
+        ), patch(
+            "WebAnalytics.core.collector.discover_sites",
+            return_value=[self.site, second_site],
+        ), patch(
+            "WebAnalytics.core.collector._run_once_unlocked", side_effect=fake_round
+        ):
+            result = _run_history_backfill_unlocked(self.config)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls[0]), 2)
+        self.assertEqual(len(calls[1]), 1)
+        self.assertEqual(result["incomplete_site_ids"], [])
 
 
 if __name__ == "__main__":

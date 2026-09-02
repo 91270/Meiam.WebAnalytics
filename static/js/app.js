@@ -260,7 +260,7 @@
         badge.removeClass('is-good is-warn');
         if (!diagnostics || !diagnostics.service_ready || !run || !run.running) return badge.addClass('is-warn').html('<i></i>实时服务未运行');
         if (!diagnostics.socket_ready) return badge.addClass('is-warn').html('<i></i>Socket 未就绪');
-        if (diagnostics.backfill_for_site) return badge.addClass('is-warn').html('<i></i>当前网站数据预热中');
+        if (diagnostics.backfill_for_site) return badge.addClass('is-warn').html('<i></i>正在恢复历史数据');
         if (!diagnostics.webserver_configured && !diagnostics.nginx_configured) return badge.addClass('is-warn').html('<i></i>站点尚未接入');
         var queue = diagnostics.queue || {};
         if (Number(queue.write_errors || 0) > 0 || Number(queue.dropped || 0) > 0) return badge.addClass('is-warn').html('<i></i>采集队列异常');
@@ -279,7 +279,7 @@
             var serviceError = ((data.health || {}).realtime_service || {}).error || '';
             showNotice('实时采集服务未正常运行' + (serviceError ? '：' + serviceError : '，当前不会产生新统计数据。'), true);
         } else if (diagnostics.backfill_for_site) {
-            showNotice('正在预热当前网站已有访问日志；页面会自动接收后续实时请求。');
+            showNotice('正在从当前及轮转访问日志恢复完整历史数据；已完成部分会立即显示。');
         } else if (!diagnostics.webserver_configured && !diagnostics.nginx_configured) {
             showNotice('当前网站尚未写入 ' + (diagnostics.web_server === 'apache' ? 'Apache' : 'Nginx') + ' 实时日志扩展配置。', true);
         } else if (Number(queue.write_errors || 0) > 0) {

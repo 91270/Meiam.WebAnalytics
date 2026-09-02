@@ -20,7 +20,7 @@ if str(PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT))
 
 from core.metrics import is_excluded
-from core.collector import run_once
+from core.collector import run_history_backfill
 from core.nginx_config import configure_all
 from core.realtime_queue import RealtimeQueue
 from core.repository import Repository
@@ -81,12 +81,7 @@ def main():
     def initial_backfill(site_ids):
         nonlocal backfill_state
         try:
-            backfill_config = dict(config)
-            backfill_config["collect_from_end"] = False
-            backfill_config["only_sites_without_statistics"] = True
-            backfill_config["force_tail_backfill"] = True
-            result = run_once(backfill_config)
-            result["status"] = "complete"
+            result = run_history_backfill(dict(config), site_ids)
             result["requested_site_ids"] = sorted(site_ids)
             backfill_state = result
         except Exception as error:
@@ -176,6 +171,13 @@ def main():
                         internal_id = mapping.get(panel_site_id)
                         if internal_id is None:
                             rejected += 1
+                        elif (
+                            backfill_state.get("status") == "running"
+                            and internal_id in set(backfill_state.get("site_ids", []))
+                        ):
+                            # 历史导入期间以磁盘访问日志为唯一数据源，避免同一请求
+                            # 同时经 syslog 与文件补录而重复累计。
+                            pass
                         else:
                             received += 1
                             last_received = int(time.time())

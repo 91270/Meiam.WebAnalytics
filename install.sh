@@ -59,9 +59,10 @@ Install() {
     migrate_persistent_data
     chmod 700 "${plugin_path}/scripts/collect.py" "${plugin_path}/scripts/init_db.py" \
         "${plugin_path}/scripts/socket_server.py" "${plugin_path}/scripts/configure_nginx.py" \
-        "${plugin_path}/scripts/bootstrap_data.py"
+        "${plugin_path}/scripts/bootstrap_data.py" "${plugin_path}/scripts/restore_data.py"
+    "${panel_python}" "${plugin_path}/scripts/restore_data.py" || exit 1
     "${panel_python}" "${plugin_path}/scripts/init_db.py" || exit 1
-    echo "正在预热已有网站日志统计..."
+    echo "正在恢复并补齐已有网站日志统计..."
     "${panel_python}" "${plugin_path}/scripts/bootstrap_data.py" || \
         echo "历史数据预热未完成，实时采集仍将继续运行"
     rm -f /etc/cron.d/webanalytics /etc/cron.d/webanalytics.tmp
@@ -83,6 +84,8 @@ Update() {
         systemctl stop "${service_name}" >/dev/null 2>&1 || true
     fi
     migrate_persistent_data
+    chmod 700 "${plugin_path}/scripts/restore_data.py"
+    "${panel_python}" "${plugin_path}/scripts/restore_data.py" || exit 1
     "${panel_python}" "${plugin_path}/scripts/init_db.py" || exit 1
     chmod 700 "${plugin_path}/scripts/bootstrap_data.py"
     echo "正在检查未补录网站..."
@@ -112,8 +115,7 @@ Uninstall() {
         echo "统计数据已备份到 ${backup_path}"
     fi
     rm -rf "${plugin_path}"
-    rm -rf "${persistent_root}"
-    echo "卸载完成，原始网站日志未被修改"
+    echo "卸载完成，统计数据库保留在 ${data_path}，原始网站日志未被修改"
 }
 
 case "${1:-}" in

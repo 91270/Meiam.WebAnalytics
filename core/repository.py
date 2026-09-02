@@ -446,6 +446,10 @@ class Repository:
         with self.session() as connection:
             self._upsert_cursor(connection, site_id, log_path, cursor)
 
+    def clear_cursor(self, site_id: int) -> None:
+        with self.session() as connection:
+            connection.execute("DELETE FROM file_cursors WHERE site_id=?", (int(site_id),))
+
     @staticmethod
     def _upsert_cursor(
         connection: sqlite3.Connection,
