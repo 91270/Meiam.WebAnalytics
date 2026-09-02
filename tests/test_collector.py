@@ -3,6 +3,8 @@ from __future__ import annotations
 import tempfile
 import unittest
 import gzip
+import io
+import tarfile
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -179,12 +181,20 @@ class CollectorTests(unittest.TestCase):
     def test_full_history_reads_rotated_gzip_and_current_logs_once(self):
         rotated_plain = self.root / "example.test.log.2"
         rotated_gzip = self.root / "example.test.log.1.gz"
+        rotated_tar = self.root / "example.test.log.archive.tar.gz"
         rotated_plain.write_text(
             line("192.0.2.1", "31/Aug/2026:23:59:00 +0800", "/old"),
             encoding="utf-8",
         )
         with gzip.open(str(rotated_gzip), "wt", encoding="utf-8") as stream:
             stream.write(line("192.0.2.2", "01/Sep/2026:00:01:00 +0800", "/gzip"))
+        archived_line = line(
+            "192.0.2.4", "01/Sep/2026:00:01:30 +0800", "/tar-gzip"
+        ).encode("utf-8")
+        with tarfile.open(str(rotated_tar), "w:gz") as archive:
+            member = tarfile.TarInfo("example.test.log")
+            member.size = len(archived_line)
+            archive.addfile(member, io.BytesIO(archived_line))
         self.log_path.write_text(
             line("192.0.2.3", "01/Sep/2026:00:02:00 +0800", "/current"),
             encoding="utf-8",
@@ -199,7 +209,7 @@ class CollectorTests(unittest.TestCase):
             self.repository, self.site_id, self.site, config, float("inf")
         )
         self.assertTrue(first["complete"])
-        self.assertEqual(first["events"], 3)
+        self.assertEqual(first["events"], 4)
         second = collect_site(
             self.repository, self.site_id, self.site, config, float("inf")
         )
@@ -207,7 +217,7 @@ class CollectorTests(unittest.TestCase):
 
         start = int(datetime.fromisoformat("2026-08-31T00:00:00+08:00").timestamp())
         overview = self.repository.get_overview(self.site_id, start, start + 172800)
-        self.assertEqual(overview["requests"], 3)
+        self.assertEqual(overview["requests"], 4)
 
     def test_history_backfill_keeps_targets_not_reached_in_previous_round(self):
         second_log = self.root / "second.test.log"
@@ -254,6 +264,21 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(len(calls[0]), 2)
         self.assertEqual(len(calls[1]), 1)
         self.assertEqual(result["incomplete_site_ids"], [])
+
+    def test_history_backfill_completes_and_persists_site_state(self):
+        self.log_path.write_text(
+            line("203.0.113.9", "02/Sep/2026:17:30:54 +0800", "/history"),
+            encoding="utf-8",
+        )
+        with patch(
+            "WebAnalytics.core.collector.Repository", return_value=self.repository
+        ), patch(
+            "WebAnalytics.core.collector.discover_sites", return_value=[self.site]
+        ):
+            result = _run_history_backfill_unlocked(self.config)
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["events"], 1)
+        self.assertFalse(self.repository.needs_history_import(self.site_id))
 
 
 if __name__ == "__main__":

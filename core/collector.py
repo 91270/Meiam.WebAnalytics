@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import gzip
+import tarfile
 import time
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -120,9 +121,13 @@ def _read_batches(
     batch_size: int,
     discard_partial_line: bool = False,
 ) -> Iterable[Tuple[List[str], int]]:
+    lower_name = source.name.lower()
+    if lower_name.endswith((".tar.gz", ".tgz", ".tar")):
+        yield from _read_tar_batches(source, start_offset, batch_size)
+        return
     stream_context = (
         gzip.open(str(source), "rb")
-        if source.name.lower().endswith(".gz")
+        if lower_name.endswith(".gz")
         else source.open("rb")
     )
     with stream_context as stream:
@@ -144,6 +149,40 @@ def _read_batches(
             if not lines:
                 break
             yield lines, offset
+
+
+def _read_tar_batches(
+    source: Path, start_offset: int, batch_size: int
+) -> Iterable[Tuple[List[str], int]]:
+    """按归档成员内容的虚拟偏移续读 tar/tar.gz，忽略目录和元数据块。"""
+    virtual_base = 0
+    with tarfile.open(str(source), "r:*") as archive:
+        for member in archive.getmembers():
+            if not member.isfile():
+                continue
+            member_end = virtual_base + int(member.size)
+            if start_offset >= member_end:
+                virtual_base = member_end
+                continue
+            extracted = archive.extractfile(member)
+            if extracted is None:
+                virtual_base = member_end
+                continue
+            with extracted as stream:
+                local_offset = max(0, start_offset - virtual_base)
+                stream.seek(local_offset)
+                while True:
+                    lines: List[str] = []
+                    while len(lines) < batch_size:
+                        raw = stream.readline()
+                        if not raw:
+                            break
+                        # 归档日志已经关闭，不会再补齐末行；接受无换行的完整末行。
+                        lines.append(raw.decode("utf-8", "replace"))
+                    if not lines:
+                        break
+                    yield lines, virtual_base + stream.tell()
+            virtual_base = member_end
 
 
 def collect_site(
@@ -318,7 +357,7 @@ def _run_history_backfill_unlocked(
     config: Optional[Dict[str, object]] = None,
     requested_site_ids: Optional[Iterable[int]] = None,
 ) -> Dict[str, object]:
-    """完整且可续跑地导入无统计站点的现存日志（含轮转及 gzip）。"""
+    """完整且可续跑地导入站点现存日志（含轮转及 gzip）。"""
     backfill_config = dict(config or load_config())
     repository = Repository()
     repository.initialize()
@@ -329,9 +368,10 @@ def _run_history_backfill_unlocked(
         site_id = repository.register_site(site)
         if requested and site_id not in requested:
             continue
-        if repository.has_site_statistics(site_id):
+        if not repository.needs_history_import(site_id):
             continue
-        repository.clear_cursor(site_id)
+        if repository.begin_history_import(site_id):
+            repository.clear_cursor(site_id)
         pending.append(site_id)
 
     started = int(time.time())
@@ -390,6 +430,12 @@ def _run_history_backfill_unlocked(
             if site_result.get("error"):
                 aggregate["error"] = site_result["error"]
         round_completed = {int(value) for value in result["completed_site_ids"]}
+        for site_id in pending:
+            site_result = result.get("site_results", {}).get(str(site_id), {})
+            if site_result:
+                repository.update_history_import(
+                    site_id, site_result, site_id in round_completed
+                )
         completed.update(round_completed)
         # 一轮的时间预算可能在后续站点开始前就耗尽；未出现在
         # completed_site_ids 的目标都必须保留到下一轮，不能静默漏掉。

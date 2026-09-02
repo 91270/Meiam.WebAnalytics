@@ -21,7 +21,7 @@ from .settings import DB_PATH
 from .site_discovery import SiteDefinition
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -163,6 +163,19 @@ class Repository:
                     updated_at INTEGER NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS history_import (
+                    site_id INTEGER PRIMARY KEY,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    lines INTEGER NOT NULL DEFAULT 0,
+                    events INTEGER NOT NULL DEFAULT 0,
+                    rejected INTEGER NOT NULL DEFAULT 0,
+                    started_at INTEGER NOT NULL DEFAULT 0,
+                    updated_at INTEGER NOT NULL DEFAULT 0,
+                    completed_at INTEGER NOT NULL DEFAULT 0,
+                    error TEXT NOT NULL DEFAULT '',
+                    FOREIGN KEY(site_id) REFERENCES sites(id) ON DELETE CASCADE
+                );
+
                 """
             )
             self._upgrade_legacy_columns(connection)
@@ -186,6 +199,22 @@ class Repository:
                 )
             elif int(row["version"]) <= 1:
                 self._migrate_exact_uniques(connection)
+                connection.execute("UPDATE schema_version SET version=?", (SCHEMA_VERSION,))
+                now = int(time.time())
+                connection.execute(
+                    """INSERT OR IGNORE INTO history_import
+                       (site_id,status,started_at,updated_at,completed_at)
+                       SELECT DISTINCT site_id,'complete',?,?,? FROM metric_minute""",
+                    (now, now, now),
+                )
+            elif int(row["version"]) == 2:
+                now = int(time.time())
+                connection.execute(
+                    """INSERT OR IGNORE INTO history_import
+                       (site_id,status,started_at,updated_at,completed_at)
+                       SELECT DISTINCT site_id,'complete',?,?,? FROM metric_minute""",
+                    (now, now, now),
+                )
                 connection.execute("UPDATE schema_version SET version=?", (SCHEMA_VERSION,))
             elif int(row["version"]) != SCHEMA_VERSION:
                 raise RuntimeError("不支持的数据库版本: {}".format(row["version"]))
@@ -449,6 +478,56 @@ class Repository:
     def clear_cursor(self, site_id: int) -> None:
         with self.session() as connection:
             connection.execute("DELETE FROM file_cursors WHERE site_id=?", (int(site_id),))
+
+    def history_import_status(self, site_id: int) -> Optional[Dict[str, Any]]:
+        with self.session() as connection:
+            row = connection.execute(
+                "SELECT * FROM history_import WHERE site_id=?", (int(site_id),)
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def needs_history_import(self, site_id: int) -> bool:
+        state = self.history_import_status(site_id)
+        return state is None or str(state.get("status")) != "complete"
+
+    def begin_history_import(self, site_id: int) -> bool:
+        """首次开始返回 True；中断续跑返回 False。"""
+        now = int(time.time())
+        with self.session() as connection:
+            row = connection.execute(
+                "SELECT status FROM history_import WHERE site_id=?", (int(site_id),)
+            ).fetchone()
+            if row is None:
+                connection.execute(
+                    """INSERT INTO history_import
+                       (site_id,status,started_at,updated_at) VALUES (?,'running',?,?)""",
+                    (int(site_id), now, now),
+                )
+                return True
+            connection.execute(
+                "UPDATE history_import SET status='running',updated_at=?,error='' WHERE site_id=?",
+                (now, int(site_id)),
+            )
+        return False
+
+    def update_history_import(
+        self, site_id: int, result: Dict[str, Any], complete: bool = False
+    ) -> None:
+        now = int(time.time())
+        with self.session() as connection:
+            connection.execute(
+                """UPDATE history_import SET status=?,lines=lines+?,events=events+?,
+                   rejected=rejected+?,updated_at=?,completed_at=? WHERE site_id=?""",
+                (
+                    "complete" if complete else "running",
+                    int(result.get("lines", 0)),
+                    int(result.get("events", 0)),
+                    int(result.get("rejected", 0)),
+                    now,
+                    now if complete else 0,
+                    int(site_id),
+                ),
+            )
 
     @staticmethod
     def _upsert_cursor(

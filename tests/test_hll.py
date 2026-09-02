@@ -11,6 +11,47 @@ from WebAnalytics.core.site_discovery import SiteDefinition
 
 
 class HyperLogLogTests(unittest.TestCase):
+    def test_history_import_progress_survives_service_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Repository(Path(directory) / "stats.db")
+            repository.initialize()
+            site_id = repository.register_site(
+                SiteDefinition(8, "history.test", "/srv/history", "/logs/history.log")
+            )
+            self.assertTrue(repository.needs_history_import(site_id))
+            self.assertTrue(repository.begin_history_import(site_id))
+            repository.update_history_import(
+                site_id, {"lines": 100, "events": 98, "rejected": 2}
+            )
+            self.assertFalse(repository.begin_history_import(site_id))
+            repository.update_history_import(
+                site_id, {"lines": 50, "events": 50, "rejected": 0}, complete=True
+            )
+            state = repository.history_import_status(site_id)
+            self.assertEqual(state["status"], "complete")
+            self.assertEqual(state["lines"], 150)
+            self.assertEqual(state["events"], 148)
+            self.assertFalse(repository.needs_history_import(site_id))
+
+    def test_schema_two_with_metrics_is_not_reimported_on_upgrade(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Repository(Path(directory) / "stats.db")
+            repository.initialize()
+            site_id = repository.register_site(
+                SiteDefinition(9, "upgrade.test", "/srv/upgrade", "/logs/upgrade.log")
+            )
+            with repository.session() as connection:
+                connection.execute("UPDATE schema_version SET version=2")
+                connection.execute("DELETE FROM history_import WHERE site_id=?", (site_id,))
+                connection.execute(
+                    """INSERT INTO metric_minute
+                       (site_id,minute_ts,requests,pv,body_bytes,errors,bot_requests)
+                       VALUES (?,?,?,?,?,?,?)""",
+                    (site_id, 1788341400, 1, 1, 1287, 0, 0),
+                )
+            repository.initialize()
+            self.assertFalse(repository.needs_history_import(site_id))
+
     def test_small_cardinality_and_serialization(self):
         sketch = HyperLogLog(10)
         for value in ("a", "b", "c", "c"):

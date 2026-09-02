@@ -67,9 +67,6 @@ Install() {
         "${plugin_path}/scripts/socket_server.py" "${plugin_path}/scripts/configure_nginx.py" \
         "${plugin_path}/scripts/bootstrap_data.py"
     "${panel_python}" "${plugin_path}/scripts/init_db.py" || exit 1
-    echo "正在从服务器现存网站日志初始化历史统计..."
-    "${panel_python}" "${plugin_path}/scripts/bootstrap_data.py" || \
-        echo "历史数据预热未完成，实时采集仍将继续运行"
     rm -f /etc/cron.d/webanalytics /etc/cron.d/webanalytics.tmp
     install_service || exit 1
     if ! "${panel_python}" "${plugin_path}/scripts/configure_nginx.py" enable; then
@@ -79,7 +76,7 @@ Install() {
         exit 1
     fi
     echo "================================================"
-    echo "安装完成：Nginx/Apache 日志将通过 Unix Socket 实时写入统计服务"
+    echo "安装完成：历史日志正在后台重建，Nginx/Apache 新请求将实时写入统计服务"
 }
 
 Update() {
@@ -91,9 +88,6 @@ Update() {
     migrate_persistent_data
     "${panel_python}" "${plugin_path}/scripts/init_db.py" || exit 1
     chmod 700 "${plugin_path}/scripts/bootstrap_data.py"
-    echo "正在检查未补录网站..."
-    "${panel_python}" "${plugin_path}/scripts/bootstrap_data.py" || \
-        echo "部分网站补录未完成，实时采集仍将继续运行"
     rm -f /etc/cron.d/webanalytics /etc/cron.d/webanalytics.tmp
     install_service || exit 1
     "${panel_python}" "${plugin_path}/scripts/configure_nginx.py" enable || exit 1

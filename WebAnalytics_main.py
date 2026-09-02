@@ -33,7 +33,7 @@ except ImportError:  # 允许本地自动测试导入
 
 def _load_runtime_package():
     """以版本化名称加载核心，避开宝塔常驻进程中残留的 ``core`` 模块。"""
-    package_name = "_webanalytics_runtime_045"
+    package_name = "_webanalytics_runtime_046"
     package_init = PLUGIN_ROOT / "core" / "__init__.py"
     loaded = sys.modules.get(package_name)
     loaded_file = Path(getattr(loaded, "__file__", "")).resolve() if loaded else None

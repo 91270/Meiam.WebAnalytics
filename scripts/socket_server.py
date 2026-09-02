@@ -99,7 +99,7 @@ def main():
         missing = {
             int(site_id)
             for site_id in mapping.values()
-            if not repository.has_site_statistics(int(site_id))
+            if repository.needs_history_import(int(site_id))
             and int(site_id) not in attempted_backfill_sites
         }
         if not missing:
