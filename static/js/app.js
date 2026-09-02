@@ -10,13 +10,13 @@
     };
 
     var metrics = [
-        { key: 'pv', label: '浏览量 (PV)', tip: '排除静态资源后的 GET/HEAD 请求' },
-        { key: 'uv', label: '访客量 (UV)', tip: '每日 IP + User-Agent 哈希估算' },
-        { key: 'ip', label: 'IP 数', tip: '所选时间范围内的独立 IP' },
-        { key: 'body_bytes', label: '流量', tip: '响应日志中的字节数之和', bytes: true },
-        { key: 'requests', label: '请求', tip: '纳入统计的访问日志总数' },
-        { key: 'realtime_bytes', label: '实时流量', tip: '最近完整采集分钟的响应流量', bytes: true },
-        { key: 'qps', label: '每秒请求', tip: '最近完整采集分钟请求数 / 60', decimal: true }
+        { key: 'pv', label: '浏览量 (PV)', tip: '页面浏览请求次数。仅统计 GET/HEAD、2xx/3xx 响应，并排除静态资源与爬虫。' },
+        { key: 'uv', label: '访客量 (UV)', tip: '所选时段内的独立访客估算值，以 IP + User-Agent 生成匿名指纹并使用 HLL 去重。' },
+        { key: 'ip', label: 'IP 数', tip: '所选时段内访问网站的独立来源 IP 估算值，使用 HLL 低内存去重。' },
+        { key: 'body_bytes', label: '流量', tip: '所选时段内全部已采集请求的响应字节数之和，以访问日志记录值为准。', bytes: true },
+        { key: 'requests', label: '请求', tip: '所选时段内成功解析并纳入统计的访问日志请求总数。' },
+        { key: 'realtime_bytes', label: '实时流量', tip: '当前时段中最近一个已采集分钟的响应字节数，用于观察短时流量。', bytes: true },
+        { key: 'qps', label: '每秒请求', tip: '当前时段中最近一个已采集分钟的请求数除以 60，表示该分钟的平均每秒请求数。', decimal: true }
     ];
 
     function requestPlugin(method, args, callback) {
@@ -102,14 +102,16 @@
         var current = data.overview || {};
         var previous = data.previous || {};
         var html = '';
-        metrics.forEach(function (metric) {
+        metrics.forEach(function (metric, index) {
             var currentValue = metricValue(current, metric);
             var previousValue = metricValue(previous, metric);
             var comparison = previousValue > 0 ? ((currentValue - previousValue) / previousValue * 100) : null;
             var comparisonText = comparison == null ? '暂无对比' : (comparison >= 0 ? '↑ ' : '↓ ') + Math.abs(comparison).toFixed(1) + '%';
             var comparisonClass = comparison == null ? '' : (comparison >= 0 ? ' class="is-up"' : ' class="is-down"');
-            html += '<button class="wa-metric' + (state.metric === metric.key ? ' is-active' : '') + '" data-metric="' + metric.key + '" title="' + escapeHtml(metric.tip) + '">'
-                + '<div class="wa-metric-label">' + escapeHtml(metric.label) + '<em>?</em></div>'
+            var helpPosition = index === 0 ? ' is-left' : (index === metrics.length - 1 ? ' is-right' : '');
+            html += '<button class="wa-metric' + (state.metric === metric.key ? ' is-active' : '') + '" data-metric="' + metric.key + '" aria-label="' + escapeHtml(metric.label + '：' + metric.tip) + '">'
+                + '<div class="wa-metric-label"><span class="wa-metric-name">' + escapeHtml(metric.label) + '</span>'
+                + '<span class="wa-metric-help' + helpPosition + '" data-tip="' + escapeHtml(metric.tip) + '" aria-hidden="true">?</span></div>'
                 + '<div class="wa-metric-value">' + formatMetric(currentValue, metric) + '</div>'
                 + '<div class="wa-metric-compare">上一时段 <b' + comparisonClass + '>' + comparisonText + '</b></div></button>';
         });
