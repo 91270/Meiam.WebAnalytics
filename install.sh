@@ -22,6 +22,12 @@ migrate_persistent_data() {
     chmod 700 "${persistent_root}" "${data_path}"
 }
 
+reset_statistics_database() {
+    # 兼容从曾经“卸载后保留数据”的旧测试版重装：安装动作始终以日志为准重建。
+    rm -f "${data_path}/stats.db" "${data_path}/stats.db-wal" \
+        "${data_path}/stats.db-shm" "${data_path}/collector.lock"
+}
+
 detect_python() {
     if [ -x "${panel_python}" ]; then
         return 0
@@ -56,6 +62,7 @@ Install() {
         systemctl stop "${service_name}" >/dev/null 2>&1 || true
     fi
     migrate_persistent_data
+    reset_statistics_database
     chmod 700 "${plugin_path}/scripts/collect.py" "${plugin_path}/scripts/init_db.py" \
         "${plugin_path}/scripts/socket_server.py" "${plugin_path}/scripts/configure_nginx.py" \
         "${plugin_path}/scripts/bootstrap_data.py"
