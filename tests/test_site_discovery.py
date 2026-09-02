@@ -73,6 +73,19 @@ class SiteDiscoveryTests(unittest.TestCase):
         self.assertEqual(sites[0].web_server, "nginx")
         self.assertEqual(sites[0].log_path, str(custom_log.resolve()))
 
+    def test_unquoted_nginx_log_path_does_not_include_semicolon(self):
+        vhost_dir = self.root / "vhost" / "nginx"
+        vhost_dir.mkdir(parents=True)
+        custom_log = self.log_dir / "custom-unquoted.log"
+        custom_log.write_text("", encoding="utf-8")
+        (vhost_dir / "example.test.conf").write_text(
+            "server {{\n    access_log {};\n}}\n".format(custom_log),
+            encoding="utf-8",
+        )
+        with patch("WebAnalytics.core.site_discovery.NGINX_VHOST_DIR", vhost_dir):
+            sites = discover_sites(self.config())
+        self.assertEqual(sites[0].log_path, str(custom_log.resolve()))
+
     def test_orphan_log_discovery_requires_explicit_opt_in(self):
         sites = discover_sites(self.config(True))
         self.assertEqual(

@@ -63,6 +63,10 @@ def _configured_log_path(log_dir: Path, site_name: str, web_server: str) -> Path
             raw_paths = [next((item for item in match if item), "") for match in values]
         allowed_root = log_dir.resolve()
         for raw_path in raw_paths:
+            raw_path = raw_path.strip()
+            if web_server == "nginx":
+                # 未加引号的 Nginx 指令会让正则把语句结尾分号一并捕获。
+                raw_path = raw_path.rstrip(";").rstrip()
             if (
                 not raw_path
                 or raw_path.lower() == "off"

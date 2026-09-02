@@ -168,6 +168,38 @@ class HyperLogLogTests(unittest.TestCase):
                 ).fetchone()
             self.assertEqual(int(count["total"]), 1)
 
+    def test_trailing_semicolon_path_fix_resets_site_for_authoritative_rebuild(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Repository(Path(directory) / "stats.db")
+            repository.initialize()
+            wrong = SiteDefinition(
+                10, "semicolon.test", "/srv/semicolon", "/logs/semicolon.log;"
+            )
+            site_id = repository.register_site(wrong)
+            with repository.session() as connection:
+                connection.execute(
+                    """INSERT INTO metric_minute
+                       (site_id,minute_ts,requests,pv,body_bytes,errors,bot_requests)
+                       VALUES (?,?,?,?,?,?,?)""",
+                    (site_id, 1788341400, 2, 2, 2574, 0, 0),
+                )
+            repository.begin_history_import(site_id)
+            repository.update_history_import(site_id, {}, complete=True)
+
+            corrected_id = repository.register_site(
+                SiteDefinition(
+                    10, "semicolon.test", "/srv/semicolon", "/logs/semicolon.log"
+                )
+            )
+            self.assertEqual(corrected_id, site_id)
+            self.assertTrue(repository.needs_history_import(site_id))
+            with repository.session() as connection:
+                count = connection.execute(
+                    "SELECT COUNT(*) AS total FROM metric_minute WHERE site_id=?",
+                    (site_id,),
+                ).fetchone()
+            self.assertEqual(int(count["total"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

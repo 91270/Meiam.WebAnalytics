@@ -390,6 +390,9 @@ class Repository:
                         ),
                     )
                     if previous_log_path != site.log_path:
+                        syntax_path_fix = (
+                            previous_log_path.rstrip(";").rstrip() == site.log_path
+                        )
                         cursor = connection.execute(
                             "SELECT log_path FROM file_cursors WHERE site_id=?",
                             (canonical_id,),
@@ -398,6 +401,21 @@ class Repository:
                             connection.execute(
                                 "DELETE FROM file_cursors WHERE site_id=?", (canonical_id,)
                             )
+                        if syntax_path_fix:
+                            # 早期版本把 Nginx 指令分号存进了日志路径，实际从未
+                            # 读取文件；实时收到的少量记录也包含在原始日志中。
+                            # 清空该站点缓存后以真实日志为唯一来源完整重建。
+                            for table in (
+                                "metric_minute",
+                                "visitor_day",
+                                "ip_day",
+                                "unique_hll_hour",
+                                "history_import",
+                            ):
+                                connection.execute(
+                                    "DELETE FROM {} WHERE site_id=?".format(table),
+                                    (canonical_id,),
+                                )
                     return canonical_id
             connection.execute(
                 """
