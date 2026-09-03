@@ -102,18 +102,32 @@
 
     function renderSiteOptions(sites, selected) {
         var signature = sites.map(function (site) {
-            return Number(site.id) + ':' + String(site.name || '');
+            return Number(site.id) + ':' + String(site.name || '') + ':' + Number(site.panel_site_id || 0);
         }).join('|');
-        var select = $('#wa-site');
+        var menu = $('#wa-site-menu');
         if (signature !== state.siteOptionsSignature) {
             var html = '';
             sites.forEach(function (site) {
-                html += '<option value="' + Number(site.id) + '">' + escapeHtml(site.name) + '</option>';
+                var siteId = Number(site.id);
+                html += '<button type="button" class="wa-site-option" role="option" data-site-id="' + siteId + '" aria-selected="false">'
+                    + '<span class="wa-site-option-icon">W</span><span class="wa-site-option-text"><strong>' + escapeHtml(site.name) + '</strong>'
+                    + '<small>站点 ID ' + Number(site.panel_site_id || siteId) + '</small></span><span class="wa-site-option-check"></span></button>';
             });
-            select.html(html);
+            menu.html(html);
             state.siteOptionsSignature = signature;
         }
-        select.val(String(Number(selected || 0))).prop('disabled', !sites.length);
+        var selectedId = Number(selected || 0);
+        var selectedSite = sites.filter(function (site) { return Number(site.id) === selectedId; })[0];
+        $('#wa-site-current').text(selectedSite ? selectedSite.name : '请选择网站');
+        $('#wa-site-trigger').prop('disabled', !sites.length);
+        menu.find('.wa-site-option').removeClass('is-selected').attr('aria-selected', 'false').find('.wa-site-option-check').text('');
+        menu.find('[data-site-id="' + selectedId + '"]').addClass('is-selected').attr('aria-selected', 'true').find('.wa-site-option-check').text('✓');
+    }
+
+    function closeSitePicker() {
+        $('#wa-site-picker').removeClass('is-open');
+        $('#wa-site-trigger').attr('aria-expanded', 'false');
+        $('#wa-site-menu').prop('hidden', true);
     }
 
     function showPage(page) {
@@ -688,9 +702,37 @@
         });
     }
 
-    $('#wa-site').on('change', function () {
-        state.siteId = Number(this.value || 0);
+    $('#wa-site-trigger').on('click', function () {
+        if ($(this).prop('disabled')) return;
+        var picker = $('#wa-site-picker');
+        var open = !picker.hasClass('is-open');
+        closeSitePicker();
+        if (open) {
+            picker.addClass('is-open');
+            $(this).attr('aria-expanded', 'true');
+            $('#wa-site-menu').prop('hidden', false).find('.is-selected').trigger('focus');
+        }
+    });
+
+    $('#wa-site-menu').on('click', '.wa-site-option', function () {
+        state.siteId = Number($(this).data('site-id') || 0);
+        closeSitePicker();
         loadCurrentPage();
+    });
+
+    $(document).on('mousedown.webanalytics-site-picker', function (event) {
+        if (!$(event.target).closest('#wa-site-picker').length) closeSitePicker();
+    });
+
+    $('#wa-site-picker').on('keydown', function (event) {
+        var options = $('#wa-site-menu .wa-site-option');
+        if (event.key === 'Escape') { closeSitePicker(); $('#wa-site-trigger').trigger('focus'); return; }
+        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+        event.preventDefault();
+        if ($('#wa-site-menu').prop('hidden')) $('#wa-site-trigger').trigger('click');
+        var index = options.index(document.activeElement);
+        index = event.key === 'ArrowDown' ? Math.min(options.length - 1, index + 1) : Math.max(0, index < 0 ? options.length - 1 : index - 1);
+        options.eq(index).trigger('focus');
     });
 
     $('.wa-nav').on('click', 'button[data-page]', function () {

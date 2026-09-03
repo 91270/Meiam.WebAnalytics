@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="/WebAnalytics/static/css/app.css?v=0.5.6">
+<link rel="stylesheet" href="/WebAnalytics/static/css/app.css?v=0.5.7">
 
 <div class="wa-shell" id="wa-app">
     <svg class="wa-icon-sprite" aria-hidden="true">
@@ -35,9 +35,12 @@
 
     <main class="wa-main">
         <header class="wa-toolbar">
-            <label class="wa-site-filter"><span class="wa-site-caption">网站</span>
-                <span class="wa-site-select-wrap"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 4.5 6 4.5 9S15 18 12 21c-3-3-4.5-6-4.5-9S9 6 12 3Z"/></svg><select id="wa-site" aria-label="选择网站"></select></span>
-            </label>
+            <div class="wa-site-filter"><span class="wa-site-caption">网站</span>
+                <div class="wa-site-picker" id="wa-site-picker">
+                    <button class="wa-site-trigger" id="wa-site-trigger" type="button" aria-haspopup="listbox" aria-expanded="false"><svg class="wa-site-globe" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 4.5 6 4.5 9S15 18 12 21c-3-3-4.5-6-4.5-9S9 6 12 3Z"/></svg><span id="wa-site-current">请选择网站</span><svg class="wa-site-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>
+                    <div class="wa-site-menu" id="wa-site-menu" role="listbox" hidden></div>
+                </div>
+            </div>
             <div class="wa-period" role="group" aria-label="时间范围">
                 <button class="is-active" data-period="today">今日</button>
                 <button data-period="yesterday">昨日</button>
@@ -144,4 +147,4 @@
     </main>
 </div>
 
-<script src="/WebAnalytics/static/js/app.js?v=0.5.6"></script>
+<script src="/WebAnalytics/static/js/app.js?v=0.5.7"></script>
