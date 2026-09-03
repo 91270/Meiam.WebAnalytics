@@ -173,15 +173,15 @@
 .wa-table-scroll { overflow:auto; scrollbar-width:none; }
 .wa-table-scroll::-webkit-scrollbar { display:none; }
 .wa-table { width:100%; min-width:0; border-collapse:collapse; table-layout:fixed; color:#4e5b6e; font-size:12px; }
-.wa-table th:nth-child(1) { width:18%; }
+.wa-table th:nth-child(1) { width:17%; }
 .wa-table th:nth-child(2) { width:10%; }
 .wa-table th:nth-child(3) { width:8%; }
 .wa-table th:nth-child(4), .wa-table th:nth-child(5), .wa-table th:nth-child(6) { width:6%; }
 .wa-table th:nth-child(7) { width:7%; }
 .wa-table th:nth-child(8) { width:9%; }
 .wa-table th:nth-child(9) { width:8%; }
-.wa-table th:nth-child(10) { width:10%; }
-.wa-table th:nth-child(11) { width:6%; }
+.wa-table th:nth-child(10) { width:15%; }
+.wa-table th:nth-child(11) { width:8%; }
 .wa-table th { height:44px; overflow:hidden; border-bottom:1px solid #dfe6ed; padding:0 12px; background:#f8fafc; color:#788496; font-weight:500; text-align:left; text-overflow:ellipsis; white-space:nowrap; }
 .wa-table th button { border:0; padding:0; background:transparent; color:inherit; font:inherit; cursor:pointer; }
 .wa-table th button:hover, .wa-table th button.is-sorted { color:#278c3d; }
@@ -270,6 +270,7 @@
 .wa-log-table th:nth-child(5), .wa-log-table td:nth-child(5) { width:132px; text-align:left; }
 .wa-log-table th:nth-child(6), .wa-log-table td:nth-child(6) { width:180px; text-align:left; color:#65758a; }
 .wa-log-table th:nth-child(7), .wa-log-table td:nth-child(7) { width:108px; }
+.wa-request-table th:nth-child(7), .wa-request-table td:nth-child(7) { width:150px; text-align:left; }
 .wa-status-code.is-error { color:#d95753; font-weight:600; }
 .wa-inline-tools { display:flex; align-items:center; gap:7px; }
 .wa-inline-tools input, .wa-inline-tools select, .wa-settings input, .wa-settings textarea { border:1px solid #d5dde5; border-radius:5px; background:#fff; color:#344156; font:inherit; outline:0; }
@@ -314,6 +315,7 @@
     .wa-log-table th:nth-child(5), .wa-log-table td:nth-child(5) { width:118px; }
     .wa-log-table th:nth-child(6), .wa-log-table td:nth-child(6) { width:150px; }
     .wa-log-table th:nth-child(7), .wa-log-table td:nth-child(7) { width:92px; }
+    .wa-request-table th:nth-child(7), .wa-request-table td:nth-child(7) { width:132px; }
 }
 @media (max-width:860px) {
     .wa-metrics { grid-template-columns:repeat(4,minmax(0,1fr)); }

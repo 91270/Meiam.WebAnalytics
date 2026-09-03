@@ -424,16 +424,18 @@
         return Number((site.metrics || {})[key] || 0);
     }
 
-    function formatLastSeen(timestamp) {
+    function formatDateTime(timestamp) {
         var value = Number(timestamp || 0);
         if (!value) return '暂无数据';
         var date = new Date(value * 1000);
-        var now = new Date();
-        if (date.toDateString() === now.toDateString()) {
-            return String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
-        }
-        return (date.getMonth() + 1) + '-' + String(date.getDate()).padStart(2, '0') + ' '
-            + String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
+        return date.getFullYear() + '/' + (date.getMonth() + 1) + '/' + date.getDate() + ' '
+            + String(date.getHours()).padStart(2, '0') + ':'
+            + String(date.getMinutes()).padStart(2, '0') + ':'
+            + String(date.getSeconds()).padStart(2, '0');
+    }
+
+    function formatLastSeen(timestamp) {
+        return formatDateTime(timestamp);
     }
 
     function renderSitesTable() {
@@ -580,7 +582,7 @@
     function renderRequestPage(data, kind) {
         var html = '';
         (data.items || []).forEach(function (row) {
-            var date = new Date(Number(row.timestamp || 0) * 1000).toLocaleString('zh-CN');
+            var date = formatDateTime(row.timestamp);
             var tail = kind === 'errors' ? formatBytes(row.body_bytes) : escapeHtml((row.browser || 'Other') + ' / ' + (row.device || 'Other'));
             html += '<tr><td>' + escapeHtml(date) + '</td><td><span class="wa-status-code' + (Number(row.status) >= 400 ? ' is-error' : '') + '">' + Number(row.status || 0) + '</span></td><td>' + escapeHtml(row.method) + '</td><td title="' + escapeHtml(row.uri) + '">' + escapeHtml(row.uri) + '</td><td>' + escapeHtml(row.remote_addr) + '</td><td title="' + escapeHtml(row.location || '未知') + '">' + escapeHtml(row.location || '未知') + '</td><td>' + tail + '</td></tr>';
         });
