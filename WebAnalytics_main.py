@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import os
+import csv
+import io
 import importlib
 import importlib.util
 import stat
@@ -33,7 +35,7 @@ except ImportError:  # 允许本地自动测试导入
 
 def _load_runtime_package():
     """以版本化名称加载核心，避开宝塔常驻进程中残留的 ``core`` 模块。"""
-    package_name = "_webanalytics_runtime_0410"
+    package_name = "_webanalytics_runtime_0506"
     package_init = PLUGIN_ROOT / "core" / "__init__.py"
     loaded = sys.modules.get(package_name)
     loaded_file = Path(getattr(loaded, "__file__", "")).resolve() if loaded else None
@@ -54,8 +56,10 @@ def _load_runtime_package():
 _RUNTIME_PACKAGE = _load_runtime_package()
 Repository = importlib.import_module(_RUNTIME_PACKAGE + ".repository").Repository
 load_config = importlib.import_module(_RUNTIME_PACKAGE + ".settings").load_config
+save_config = importlib.import_module(_RUNTIME_PACKAGE + ".settings").save_config
 discover_sites = importlib.import_module(_RUNTIME_PACKAGE + ".site_discovery").discover_sites
 configure_all = importlib.import_module(_RUNTIME_PACKAGE + ".nginx_config").configure_all
+geoip_database_status = importlib.import_module(_RUNTIME_PACKAGE + ".ip_location").database_status
 
 
 def _arg(args: Any, key: str, default: Any = None) -> Any:
@@ -322,6 +326,162 @@ class WebAnalytics_main:
             )
         except Exception as error:
             return self._error("读取网站列表失败：{}".format(str(error)[:300]))
+
+    def get_spiders(self, args):
+        try:
+            repository = self._repo()
+            sites = self._sync_sites()
+            if not sites:
+                return self._ok({"sites": [], "ranking": [], "trend": [], "summary": {}})
+            requested_id = _bounded_int(_arg(args, "site_id", 0), 0, 0, 2147483647)
+            valid_ids = {int(site["id"]) for site in sites}
+            site_id = requested_id if requested_id in valid_ids else int(sites[0]["id"])
+            period = str(_arg(args, "period", "today"))
+            if period not in {"today", "yesterday", "7d", "30d"}:
+                period = "today"
+            start_ts, end_ts, bucket = _period_range(period)
+            data = repository.get_spiders(site_id, start_ts, end_ts, bucket)
+            data.update({
+                "sites": sites,
+                "selected_site_id": site_id,
+                "period": period,
+                "range": {"start": start_ts, "end": end_ts, "bucket": bucket},
+                "generated_at": int(time.time()),
+            })
+            return self._ok(data)
+        except Exception as error:
+            return self._error("读取蜘蛛统计失败：{}".format(str(error)[:300]))
+
+    def _query_context(self, args):
+        sites = self._sync_sites()
+        if not sites:
+            raise RuntimeError("未发现已开启访问日志的网站")
+        requested_id = _bounded_int(_arg(args, "site_id", 0), 0, 0, 2147483647)
+        valid_ids = {int(site["id"]) for site in sites}
+        site_id = requested_id if requested_id in valid_ids else int(sites[0]["id"])
+        period = str(_arg(args, "period", "today"))
+        if period not in {"today", "yesterday", "7d", "30d"}:
+            period = "today"
+        start_ts, end_ts, bucket = _period_range(period)
+        return sites, site_id, period, start_ts, end_ts, bucket
+
+    def get_clients(self, args):
+        try:
+            sites, site_id, period, start_ts, end_ts, _ = self._query_context(args)
+            data = self._repo().get_client_stats(site_id, start_ts, end_ts)
+            return self._ok({"sites": sites, "selected_site_id": site_id, "period": period,
+                             "dimensions": data, "generated_at": int(time.time())})
+        except Exception as error:
+            return self._error("读取客户端统计失败：{}".format(str(error)[:300]))
+
+    def _get_rank(self, args, kind):
+        try:
+            sites, site_id, period, start_ts, end_ts, _ = self._query_context(args)
+            rows = self._repo().get_rank(kind, site_id, start_ts, end_ts, 100)
+            data = {"sites": sites, "selected_site_id": site_id, "period": period,
+                    "items": rows, "generated_at": int(time.time())}
+            if kind == "ip":
+                data["geoip"] = geoip_database_status()
+            return self._ok(data)
+        except Exception as error:
+            return self._error("读取排行失败：{}".format(str(error)[:300]))
+
+    def get_ip_rank(self, args):
+        return self._get_rank(args, "ip")
+
+    def get_uri_rank(self, args):
+        return self._get_rank(args, "uri")
+
+    def _get_request_page(self, args, errors_only=False):
+        try:
+            sites, site_id, period, start_ts, end_ts, _ = self._query_context(args)
+            page = _bounded_int(_arg(args, "page", 1), 1, 1, 100000)
+            page_size = _bounded_int(_arg(args, "page_size", 50), 50, 10, 200)
+            query = str(_arg(args, "query", ""))[:100]
+            status_group = str(_arg(args, "status_group", ""))
+            data = self._repo().get_requests(site_id, start_ts, end_ts, page, page_size,
+                                               errors_only, query, status_group)
+            data.update({"sites": sites, "selected_site_id": site_id, "period": period,
+                         "generated_at": int(time.time())})
+            return self._ok(data)
+        except Exception as error:
+            return self._error("读取访问明细失败：{}".format(str(error)[:300]))
+
+    def get_errors(self, args):
+        return self._get_request_page(args, True)
+
+    def get_requests(self, args):
+        return self._get_request_page(args, False)
+
+    def get_reports(self, args):
+        try:
+            sites, site_id, period, start_ts, end_ts, bucket = self._query_context(args)
+            overview = self._repo().get_overview(site_id, start_ts, end_ts)
+            return self._ok({"sites": sites, "selected_site_id": site_id, "period": period,
+                             "overview": overview,
+                             "top_uri": self._repo().get_rank("uri", site_id, start_ts, end_ts, 10),
+                             "top_ip": self._repo().get_rank("ip", site_id, start_ts, end_ts, 10),
+                             "trend": self._repo().get_trend(site_id, start_ts, end_ts, bucket),
+                             "generated_at": int(time.time())})
+        except Exception as error:
+            return self._error("生成统计报告失败：{}".format(str(error)[:300]))
+
+    def get_settings(self, args):
+        safe = {key: self.config.get(key) for key in (
+            "enabled", "raw_retention_days", "error_retention_days", "analytics_retention_days", "queue_size",
+            "batch_size", "hll_precision", "excluded_paths", "static_extensions"
+        )}
+        return self._ok(safe)
+
+    def save_settings(self, args):
+        try:
+            updated = dict(self.config)
+            updated["enabled"] = str(_arg(args, "enabled", "true")).lower() in {"1", "true", "yes", "on"}
+            updated["raw_retention_days"] = _bounded_int(_arg(args, "raw_retention_days", 7), 7, 1, 365)
+            updated["error_retention_days"] = _bounded_int(_arg(args, "error_retention_days", 30), 30, 1, 730)
+            updated["analytics_retention_days"] = _bounded_int(_arg(args, "analytics_retention_days", 90), 90, 30, 3650)
+            updated["queue_size"] = _bounded_int(_arg(args, "queue_size", 20000), 20000, 1000, 200000)
+            raw_paths = str(_arg(args, "excluded_paths", ""))
+            updated["excluded_paths"] = [item.strip() for item in raw_paths.split("\n") if item.strip().startswith("/")][:100]
+            self.config = save_config(updated)
+            return self._ok(self.get_settings({})["data"], "设置已保存，采集服务将在下一次同步时应用")
+        except Exception as error:
+            return self._error("保存设置失败：{}".format(str(error)[:300]))
+
+    def set_site_enabled(self, args):
+        try:
+            site_id = _bounded_int(_arg(args, "site_id", 0), 0, 1, 2147483647)
+            enabled = str(_arg(args, "enabled", "true")).lower() in {"1", "true", "yes", "on"}
+            if not self._repo().set_site_enabled(site_id, enabled):
+                return self._error("网站不存在")
+            return self._ok({"site_id": site_id, "enabled": enabled}, "网站采集状态已更新")
+        except Exception as error:
+            return self._error("更新网站采集状态失败：{}".format(str(error)[:300]))
+
+    def clear_data(self, args):
+        try:
+            if str(_arg(args, "confirm", "")) != "CLEAR":
+                return self._error("清理数据需要确认标记 CLEAR")
+            site_id = _bounded_int(_arg(args, "site_id", 0), 0, 1, 2147483647)
+            self._repo().clear_site_data(site_id)
+            return self._ok({"site_id": site_id}, "网站统计数据已清理")
+        except Exception as error:
+            return self._error("清理数据失败：{}".format(str(error)[:300]))
+
+    def export_csv(self, args):
+        response = self.get_errors(args) if str(_arg(args, "type", "requests")) == "errors" else self.get_requests(args)
+        if not response.get("success"):
+            return response
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["时间", "IP", "方法", "URI", "状态码", "流量", "浏览器", "系统", "设备", "蜘蛛"])
+        for row in response["data"].get("items", []):
+            values = [datetime.fromtimestamp(int(row["timestamp"])).isoformat(sep=" "), row["remote_addr"],
+                      row["method"], row["uri"], row["status"], row["body_bytes"], row["browser"],
+                      row["system"], row["device"], row["spider"]]
+            writer.writerow(["'" + str(value) if str(value).startswith(("=", "+", "-", "@")) else value for value in values])
+        return self._ok({"filename": "webanalytics-{}.csv".format(int(time.time())),
+                         "content": "\ufeff" + output.getvalue()})
 
     def get_health(self, args):
         try:

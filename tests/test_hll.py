@@ -7,10 +7,45 @@ from pathlib import Path
 
 from WebAnalytics.core.hll import HyperLogLog
 from WebAnalytics.core.repository import Repository
+from WebAnalytics.core.parsers import AccessEvent
 from WebAnalytics.core.site_discovery import SiteDefinition
 
 
 class HyperLogLogTests(unittest.TestCase):
+    def test_spider_dimensions_are_recorded_and_ranked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Repository(Path(directory) / "stats.db")
+            repository.initialize()
+            site_id = repository.register_site(
+                SiteDefinition(11, "bots.test", "/srv/bots", "/logs/bots.log")
+            )
+            events = [
+                AccessEvent(1788314400, "1.1.1.1", "GET", "/", "HTTP/1.1", 200, 100, "", "Googlebot"),
+                AccessEvent(1788314460, "1.1.1.2", "GET", "/bad", "HTTP/1.1", 500, 50, "", "Googlebot"),
+                AccessEvent(1788314460, "1.1.1.3", "GET", "/", "HTTP/1.1", 200, 80, "", "Baiduspider"),
+            ]
+            repository.record_live_batch(site_id, events, "salt", ())
+            result = repository.get_spiders(site_id, 1788310800, 1788318000, 3600)
+            self.assertEqual(result["summary"]["requests"], 3)
+            self.assertEqual(result["summary"]["types"], 2)
+            self.assertEqual(result["ranking"][0]["spider"], "Googlebot")
+            self.assertEqual(result["ranking"][0]["errors"], 1)
+            self.assertEqual(sum(row["requests"] for row in result["trend"]), 3)
+            clients = repository.get_client_stats(site_id, 1788310800, 1788318000)
+            self.assertEqual(clients["device"][0]["name"], "Bot")
+            self.assertEqual(clients["device"][0]["requests"], 3)
+            ip_rows = repository.get_rank("ip", site_id, 1788310800, 1788318000)
+            self.assertEqual(len(ip_rows), 3)
+            uri_rows = repository.get_rank("uri", site_id, 1788310800, 1788318000)
+            self.assertEqual(uri_rows[0]["name"], "/")
+            errors = repository.get_requests(site_id, 1788310800, 1788318000, errors_only=True)
+            self.assertEqual(errors["total"], 1)
+            self.assertEqual(errors["items"][0]["status"], 500)
+            repository.cleanup_details(1788400000, 1788400000, "2026-01-01")
+            self.assertEqual(repository.get_requests(site_id, 1788310800, 1788318000)["total"], 0)
+            self.assertEqual(repository.get_rank("ip", site_id, 1788310800, 1788318000)[0]["requests"], 1)
+            self.assertEqual(repository.get_client_stats(site_id, 1788310800, 1788318000)["device"][0]["requests"], 3)
+
     def test_history_import_progress_survives_service_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             repository = Repository(Path(directory) / "stats.db")

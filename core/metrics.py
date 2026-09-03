@@ -7,7 +7,7 @@ from __future__ import annotations
 import hashlib
 import re
 from pathlib import PurePosixPath
-from typing import Iterable, Optional
+from typing import Dict, Iterable, Optional
 from urllib.parse import urlsplit
 
 from .parsers import AccessEvent
@@ -77,3 +77,41 @@ def spider_name(user_agent: str) -> Optional[str]:
     if re.search(r"bot|spider|crawler|slurp", user_agent, re.I):
         return "OtherBot"
     return None
+
+
+def client_info(user_agent: str) -> Dict[str, str]:
+    """轻量 UA 分类；无需外部规则库即可覆盖主流客户端。"""
+    ua = user_agent or ""
+    if re.search(r"edg/", ua, re.I):
+        browser = "Edge"
+    elif re.search(r"opr/|opera", ua, re.I):
+        browser = "Opera"
+    elif re.search(r"chrome/|crios/", ua, re.I):
+        browser = "Chrome"
+    elif re.search(r"firefox/|fxios/", ua, re.I):
+        browser = "Firefox"
+    elif re.search(r"safari/", ua, re.I):
+        browser = "Safari"
+    else:
+        browser = "Other"
+    if re.search(r"windows", ua, re.I):
+        system = "Windows"
+    elif re.search(r"android", ua, re.I):
+        system = "Android"
+    elif re.search(r"iphone|ipad|ios", ua, re.I):
+        system = "iOS"
+    elif re.search(r"mac os|macintosh", ua, re.I):
+        system = "macOS"
+    elif re.search(r"linux", ua, re.I):
+        system = "Linux"
+    else:
+        system = "Other"
+    if re.search(r"bot|spider|crawler|slurp", ua, re.I):
+        device = "Bot"
+    elif re.search(r"ipad|tablet", ua, re.I):
+        device = "Tablet"
+    elif re.search(r"mobile|iphone|android", ua, re.I):
+        device = "Mobile"
+    else:
+        device = "Desktop"
+    return {"browser": browser, "system": system, "device": device}

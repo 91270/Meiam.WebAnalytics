@@ -1,30 +1,42 @@
-<link rel="stylesheet" href="/WebAnalytics/static/css/app.css?v=0.4.10">
+<link rel="stylesheet" href="/WebAnalytics/static/css/app.css?v=0.5.6">
 
 <div class="wa-shell" id="wa-app">
+    <svg class="wa-icon-sprite" aria-hidden="true">
+        <symbol id="wa-i-overview" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+        <symbol id="wa-i-sites" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h10M7 16h6"/></symbol>
+        <symbol id="wa-i-spider" viewBox="0 0 24 24"><ellipse cx="12" cy="13" rx="4" ry="6"/><path d="M12 7V4M8.5 9 6 6M15.5 9 18 6M8 11H4M16 11h4M8 15H4M16 15h4M9 18l-2 2M15 18l2 2"/></symbol>
+        <symbol id="wa-i-client" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4M8 8h8"/></symbol>
+        <symbol id="wa-i-ip" viewBox="0 0 24 24"><path d="M12 22s7-6.1 7-13a7 7 0 1 0-14 0c0 6.9 7 13 7 13Z"/><circle cx="12" cy="9" r="2.5"/></symbol>
+        <symbol id="wa-i-uri" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1"/></symbol>
+        <symbol id="wa-i-error" viewBox="0 0 24 24"><path d="M10.3 4.1 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></symbol>
+        <symbol id="wa-i-log" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M14 3v5h5M8 12h8M8 16h8"/></symbol>
+        <symbol id="wa-i-report" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+        <symbol id="wa-i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
+    </svg>
     <aside class="wa-sidebar">
         <div class="wa-brand">
-            <span class="wa-brand-icon" aria-hidden="true">◎</span>
+            <span class="wa-brand-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><circle cx="15.5" cy="15.5" r="9.5"/><path d="M6 15.5h19M15.5 6c-3 3-4.5 6.2-4.5 9.5 0 2.4.7 4.8 2 6.8M15.5 6c2.8 2.7 4.2 5.6 4.5 8.3M7.5 24l6-5.5 3.7 3.2 7-7.5"/><circle class="wa-brand-dot" cx="24.2" cy="14.2" r="1.8"/></svg></span>
             <div><strong>网站访问分析</strong><small>WebAnalytics</small></div>
         </div>
         <nav class="wa-nav" aria-label="插件功能">
-            <button class="is-active" data-page="overview"><span>◫</span>概览</button>
-            <button data-page="sites"><span>▤</span>网站列表</button>
-            <button disabled title="阶段 B"><span>⌁</span>蜘蛛统计<i>待开发</i></button>
-            <button disabled title="阶段 B"><span>♙</span>客户端统计<i>待开发</i></button>
-            <button disabled title="阶段 B"><span>⌖</span>IP 统计<i>待开发</i></button>
-            <button disabled title="阶段 B"><span>≋</span>URI 统计<i>待开发</i></button>
-            <button disabled title="阶段 B"><span>!</span>错误日志<i>待开发</i></button>
-            <button disabled title="阶段 B"><span>≡</span>网站日志<i>待开发</i></button>
-            <button disabled title="阶段 B"><span>□</span>统计报告<i>待开发</i></button>
-            <button disabled title="阶段 B"><span>⚙</span>全局设置<i>待开发</i></button>
+            <button class="is-active" data-page="overview"><svg><use href="#wa-i-overview"/></svg><span>概览</span></button>
+            <button data-page="sites"><svg><use href="#wa-i-sites"/></svg><span>网站列表</span></button>
+            <button data-page="spiders"><svg><use href="#wa-i-spider"/></svg><span>蜘蛛统计</span></button>
+            <button data-page="clients"><svg><use href="#wa-i-client"/></svg><span>客户端统计</span></button>
+            <button data-page="ip"><svg><use href="#wa-i-ip"/></svg><span>IP 统计</span></button>
+            <button data-page="uri"><svg><use href="#wa-i-uri"/></svg><span>URI 统计</span></button>
+            <button data-page="errors"><svg><use href="#wa-i-error"/></svg><span>错误日志</span></button>
+            <button data-page="requests"><svg><use href="#wa-i-log"/></svg><span>网站日志</span></button>
+            <button data-page="reports"><svg><use href="#wa-i-report"/></svg><span>统计报告</span></button>
+            <button data-page="settings"><svg><use href="#wa-i-settings"/></svg><span>全局设置</span></button>
         </nav>
         <div class="wa-author">Developer - Meiam</div>
     </aside>
 
     <main class="wa-main">
         <header class="wa-toolbar">
-            <label class="wa-site-filter">网站
-                <select id="wa-site" aria-label="选择网站"></select>
+            <label class="wa-site-filter"><span class="wa-site-caption">网站</span>
+                <span class="wa-site-select-wrap"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 4.5 6 4.5 9S15 18 12 21c-3-3-4.5-6-4.5-9S9 6 12 3Z"/></svg><select id="wa-site" aria-label="选择网站"></select></span>
             </label>
             <div class="wa-period" role="group" aria-label="时间范围">
                 <button class="is-active" data-period="today">今日</button>
@@ -52,6 +64,7 @@
                             </div>
                             <div class="wa-legend"><span><i class="current"></i>当前时段</span><span><i class="previous"></i>上一时段</span></div>
                         </div>
+                        <div class="wa-chart-summary" id="wa-chart-summary" aria-label="趋势摘要"></div>
                         <div class="wa-chart" id="wa-chart" role="img" aria-label="访问趋势图"></div>
                         <div class="wa-chart-tabs" id="wa-chart-tabs"></div>
                     </section>
@@ -95,9 +108,40 @@
                         <span id="wa-sites-generated-at">—</span>
                     </footer>
                 </section>
+
+                <section class="wa-page" id="wa-spiders-page" data-page="spiders" hidden>
+                    <div class="wa-list-head">
+                        <div><h2>蜘蛛统计</h2><p>搜索引擎与 AI 爬虫访问占比、趋势及质量明细</p></div>
+                        <span class="wa-muted-time" id="wa-spiders-generated-at">—</span>
+                    </div>
+                    <div class="wa-spider-kpis" id="wa-spider-kpis"></div>
+                    <div class="wa-spider-grid">
+                        <section class="wa-panel-card">
+                            <div class="wa-panel-title"><strong>蜘蛛占比</strong><span>按请求数</span></div>
+                            <div class="wa-spider-share"><div class="wa-donut" id="wa-spider-donut"><b>0</b><span>蜘蛛请求</span></div><div class="wa-donut-legend" id="wa-spider-legend"></div></div>
+                        </section>
+                        <section class="wa-panel-card">
+                            <div class="wa-panel-title"><strong>访问趋势</strong><span>所选时段</span></div>
+                            <div class="wa-mini-chart" id="wa-spider-trend"></div>
+                        </section>
+                    </div>
+                    <section class="wa-panel-card wa-spider-ranking">
+                        <div class="wa-panel-title"><strong>蜘蛛明细</strong><span>按请求量排序</span></div>
+                        <table><thead><tr><th>蜘蛛</th><th class="is-number">请求</th><th class="is-number">占比</th><th class="is-number">流量</th><th class="is-number">错误率</th><th>最后访问</th></tr></thead><tbody id="wa-spider-body"></tbody></table>
+                        <div class="wa-table-empty" id="wa-spider-empty" hidden>当前时段未识别到蜘蛛访问</div>
+                    </section>
+                </section>
+
+                <section class="wa-page" data-page="clients" hidden><div class="wa-module-head"><div><h2>客户端统计</h2><p>设备、浏览器和操作系统分布</p></div></div><div class="wa-dimension-grid" id="wa-client-dimensions"></div></section>
+                <section class="wa-page" data-page="ip" hidden><div class="wa-module-head"><div><h2>IP 统计</h2><p>来源 IP、离线归属地、请求量、流量、错误率及最后访问</p></div><span class="wa-muted-time" id="wa-geoip-status"></span></div><div class="wa-data-card"><table class="wa-data-table wa-ip-table"><thead><tr><th>IP 地址</th><th>归属地</th><th>请求</th><th>流量</th><th>错误率</th><th>最后访问</th></tr></thead><tbody id="wa-ip-body"></tbody></table></div></section>
+                <section class="wa-page" data-page="uri" hidden><div class="wa-module-head"><div><h2>URI 统计</h2><p>页面与接口访问排行</p></div></div><div class="wa-data-card"><table class="wa-data-table"><thead><tr><th>URI</th><th>请求</th><th>流量</th><th>错误率</th><th>最后访问</th></tr></thead><tbody id="wa-uri-body"></tbody></table></div></section>
+                <section class="wa-page" data-page="errors" hidden><div class="wa-module-head"><div><h2>错误日志</h2><p>40x / 50x 请求筛选和导出</p></div><div class="wa-inline-tools"><select id="wa-error-group"><option value="">全部错误</option><option value="4xx">40x</option><option value="5xx">50x</option></select><input id="wa-error-query" placeholder="搜索 URI / IP"><button data-export="errors">导出 CSV</button></div></div><div class="wa-data-card"><table class="wa-data-table wa-log-table"><thead><tr><th>时间</th><th>状态</th><th>方法</th><th>URI</th><th>IP</th><th>流量</th></tr></thead><tbody id="wa-errors-body"></tbody></table></div><div class="wa-pager" id="wa-errors-pager"></div></section>
+                <section class="wa-page" data-page="requests" hidden><div class="wa-module-head"><div><h2>网站日志</h2><p>近期访问明细、组合搜索和导出</p></div><div class="wa-inline-tools"><input id="wa-request-query" placeholder="搜索 URI / IP / UA"><button data-export="requests">导出 CSV</button></div></div><div class="wa-data-card"><table class="wa-data-table wa-log-table"><thead><tr><th>时间</th><th>状态</th><th>方法</th><th>URI</th><th>IP</th><th>客户端</th></tr></thead><tbody id="wa-requests-body"></tbody></table></div><div class="wa-pager" id="wa-requests-pager"></div></section>
+                <section class="wa-page" data-page="reports" hidden><div class="wa-module-head"><div><h2>统计报告</h2><p>所选时段摘要、趋势与访问排行</p></div><button class="wa-action-button" data-export="report">导出报告 CSV</button></div><div class="wa-report-kpis" id="wa-report-kpis"></div><div class="wa-report-grid"><div class="wa-panel-card"><div class="wa-panel-title"><strong>热门 URI</strong></div><div id="wa-report-uri"></div></div><div class="wa-panel-card"><div class="wa-panel-title"><strong>活跃 IP</strong></div><div id="wa-report-ip"></div></div></div></section>
+                <section class="wa-page" data-page="settings" hidden><div class="wa-module-head"><div><h2>全局设置</h2><p>采集、保留周期、资源限制与排除规则；不会修改网站原始日志文件</p></div></div><form class="wa-settings" id="wa-settings-form"><label><span>启用实时采集</span><input name="enabled" type="checkbox"></label><label><span>数据库访问明细保留天数</span><input name="raw_retention_days" type="number" min="1" max="365"></label><label><span>错误明细保留天数</span><input name="error_retention_days" type="number" min="1" max="730"></label><label><span>分析聚合数据保留天数</span><input name="analytics_retention_days" type="number" min="30" max="3650"></label><label><span>实时队列容量</span><input name="queue_size" type="number" min="1000" max="200000"></label><label class="is-full"><span>排除 URI 前缀（每行一个）</span><textarea name="excluded_paths" rows="5"></textarea></label><div class="wa-settings-actions"><button type="submit">保存设置</button><button type="button" class="is-danger" id="wa-clear-data">清理当前网站数据</button></div></form></section>
             </div>
         </section>
     </main>
 </div>
 
-<script src="/WebAnalytics/static/js/app.js?v=0.4.10"></script>
+<script src="/WebAnalytics/static/js/app.js?v=0.5.6"></script>

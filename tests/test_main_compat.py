@@ -32,7 +32,7 @@ class LegacyRepository:
 class MainCompatibilityTests(unittest.TestCase):
     def test_panel_runtime_uses_versioned_module_namespace(self):
         self.assertTrue(
-            main_module.Repository.__module__.startswith("_webanalytics_runtime_0410.")
+            main_module.Repository.__module__.startswith("_webanalytics_runtime_0506.")
         )
 
     def test_initialization_failure_returns_json_instead_of_http_500(self):
@@ -99,6 +99,17 @@ class MainCompatibilityTests(unittest.TestCase):
             self.assertIn("metrics", sites_response["data"]["sites"][0])
             self.assertIn("status", sites_response["data"]["sites"][0])
             json.dumps(sites_response, ensure_ascii=False)
+
+            with patch(
+                "WebAnalytics.WebAnalytics_main.discover_sites",
+                return_value=discovered,
+            ):
+                spiders_response = instance.get_spiders({"site_id": 1, "period": "today"})
+            self.assertTrue(spiders_response["success"], spiders_response)
+            self.assertIn("summary", spiders_response["data"])
+            self.assertIn("ranking", spiders_response["data"])
+            self.assertIn("trend", spiders_response["data"])
+            json.dumps(spiders_response, ensure_ascii=False)
 
     def test_old_repository_without_retain_sites_is_supported(self):
         instance = object.__new__(WebAnalytics_main)

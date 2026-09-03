@@ -55,6 +55,7 @@ DEFAULTS: Dict[str, Any] = {
     "run_budget_seconds": 45,
     "raw_retention_days": 7,
     "error_retention_days": 30,
+    "analytics_retention_days": 90,
     "static_extensions": [
         "css",
         "js",

@@ -15,13 +15,14 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from .hll import HyperLogLog
-from .metrics import ip_hash, is_page_view, spider_name, visitor_hash
+from .ip_location import locate_ip
+from .metrics import client_info, ip_hash, is_page_view, request_path, spider_name, visitor_hash
 from .parsers import AccessEvent
 from .settings import DB_PATH
 from .site_discovery import SiteDefinition
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 6
 
 
 @dataclass(frozen=True)
@@ -128,6 +129,48 @@ class Repository:
                     FOREIGN KEY(site_id) REFERENCES sites(id) ON DELETE CASCADE
                 );
 
+                CREATE TABLE IF NOT EXISTS spider_minute (
+                    site_id INTEGER NOT NULL,
+                    minute_ts INTEGER NOT NULL,
+                    spider TEXT NOT NULL,
+                    requests INTEGER NOT NULL DEFAULT 0,
+                    body_bytes INTEGER NOT NULL DEFAULT 0,
+                    errors INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(site_id, minute_ts, spider),
+                    FOREIGN KEY(site_id) REFERENCES sites(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS recent_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    site_id INTEGER NOT NULL,
+                    timestamp INTEGER NOT NULL,
+                    remote_addr TEXT NOT NULL,
+                    method TEXT NOT NULL,
+                    uri TEXT NOT NULL,
+                    status INTEGER NOT NULL,
+                    body_bytes INTEGER NOT NULL DEFAULT 0,
+                    referer TEXT NOT NULL DEFAULT '',
+                    user_agent TEXT NOT NULL DEFAULT '',
+                    browser TEXT NOT NULL DEFAULT 'Other',
+                    system TEXT NOT NULL DEFAULT 'Other',
+                    device TEXT NOT NULL DEFAULT 'Other',
+                    spider TEXT NOT NULL DEFAULT '',
+                    FOREIGN KEY(site_id) REFERENCES sites(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS dimension_day (
+                    site_id INTEGER NOT NULL,
+                    day TEXT NOT NULL,
+                    dimension TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    requests INTEGER NOT NULL DEFAULT 0,
+                    body_bytes INTEGER NOT NULL DEFAULT 0,
+                    errors INTEGER NOT NULL DEFAULT 0,
+                    last_seen INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(site_id, day, dimension, value),
+                    FOREIGN KEY(site_id) REFERENCES sites(id) ON DELETE CASCADE
+                );
+
                 CREATE TABLE IF NOT EXISTS visitor_day (
                     site_id INTEGER NOT NULL,
                     day TEXT NOT NULL,
@@ -183,6 +226,14 @@ class Repository:
                 """
                 CREATE INDEX IF NOT EXISTS idx_metric_minute_time
                     ON metric_minute(minute_ts);
+                CREATE INDEX IF NOT EXISTS idx_spider_minute_time
+                    ON spider_minute(site_id, minute_ts);
+                CREATE INDEX IF NOT EXISTS idx_recent_site_time
+                    ON recent_requests(site_id, timestamp DESC);
+                CREATE INDEX IF NOT EXISTS idx_recent_site_status
+                    ON recent_requests(site_id, status, timestamp DESC);
+                CREATE INDEX IF NOT EXISTS idx_dimension_site_day
+                    ON dimension_day(site_id, dimension, day);
                 CREATE INDEX IF NOT EXISTS idx_visitor_first_minute
                     ON visitor_day(site_id, first_minute);
                 CREATE INDEX IF NOT EXISTS idx_ip_first_minute
@@ -215,6 +266,29 @@ class Repository:
                        SELECT DISTINCT site_id,'complete',?,?,? FROM metric_minute""",
                     (now, now, now),
                 )
+                connection.execute("UPDATE schema_version SET version=?", (SCHEMA_VERSION,))
+            elif int(row["version"]) == 3:
+                connection.execute("UPDATE schema_version SET version=?", (SCHEMA_VERSION,))
+            elif int(row["version"]) == 4:
+                connection.execute("UPDATE schema_version SET version=?", (SCHEMA_VERSION,))
+            elif int(row["version"]) == 5:
+                connection.execute(
+                    """INSERT OR IGNORE INTO dimension_day
+                       (site_id,day,dimension,value,requests,body_bytes,errors,last_seen)
+                       SELECT site_id,date(timestamp,'unixepoch','localtime'),'ip',remote_addr,
+                              COUNT(*),SUM(body_bytes),SUM(status>=400),MAX(timestamp)
+                       FROM recent_requests GROUP BY site_id,day,remote_addr"""
+                )
+                for dimension, column in (("uri", "uri"), ("browser", "browser"),
+                                          ("system", "system"), ("device", "device")):
+                    connection.execute(
+                        """INSERT OR IGNORE INTO dimension_day
+                           (site_id,day,dimension,value,requests,body_bytes,errors,last_seen)
+                           SELECT site_id,date(timestamp,'unixepoch','localtime'),?,{column},
+                                  COUNT(*),SUM(body_bytes),SUM(status>=400),MAX(timestamp)
+                           FROM recent_requests GROUP BY site_id,day,{column}""".format(column=column),
+                        (dimension,),
+                    )
                 connection.execute("UPDATE schema_version SET version=?", (SCHEMA_VERSION,))
             elif int(row["version"]) != SCHEMA_VERSION:
                 raise RuntimeError("不支持的数据库版本: {}".format(row["version"]))
@@ -295,6 +369,33 @@ class Repository:
                 errors=MAX(metric_minute.errors, excluded.errors),
                 bot_requests=MAX(metric_minute.bot_requests, excluded.bot_requests)
             """,
+            (canonical_id, duplicate_id),
+        )
+        connection.execute(
+            """INSERT INTO spider_minute
+               (site_id,minute_ts,spider,requests,body_bytes,errors)
+               SELECT ?,minute_ts,spider,requests,body_bytes,errors
+               FROM spider_minute WHERE site_id=?
+               ON CONFLICT(site_id,minute_ts,spider) DO UPDATE SET
+                   requests=MAX(spider_minute.requests,excluded.requests),
+                   body_bytes=MAX(spider_minute.body_bytes,excluded.body_bytes),
+                   errors=MAX(spider_minute.errors,excluded.errors)""",
+            (canonical_id, duplicate_id),
+        )
+        connection.execute(
+            """UPDATE recent_requests SET site_id=? WHERE site_id=?""",
+            (canonical_id, duplicate_id),
+        )
+        connection.execute(
+            """INSERT INTO dimension_day
+               (site_id,day,dimension,value,requests,body_bytes,errors,last_seen)
+               SELECT ?,day,dimension,value,requests,body_bytes,errors,last_seen
+               FROM dimension_day WHERE site_id=?
+               ON CONFLICT(site_id,day,dimension,value) DO UPDATE SET
+                   requests=MAX(dimension_day.requests,excluded.requests),
+                   body_bytes=MAX(dimension_day.body_bytes,excluded.body_bytes),
+                   errors=MAX(dimension_day.errors,excluded.errors),
+                   last_seen=MAX(dimension_day.last_seen,excluded.last_seen)""",
             (canonical_id, duplicate_id),
         )
         for table, hash_column in (
@@ -410,6 +511,9 @@ class Repository:
                                 "visitor_day",
                                 "ip_day",
                                 "unique_hll_hour",
+                                "spider_minute",
+                                "recent_requests",
+                                "dimension_day",
                                 "history_import",
                             ):
                                 connection.execute(
@@ -528,6 +632,19 @@ class Repository:
             )
         return False
 
+    def set_site_enabled(self, site_id: int, enabled: bool) -> bool:
+        with self.session() as connection:
+            cursor = connection.execute(
+                "UPDATE sites SET enabled=?,updated_at=? WHERE id=?",
+                (1 if enabled else 0, int(time.time()), int(site_id)),
+            )
+        return int(cursor.rowcount or 0) > 0
+
+    def clear_site_data(self, site_id: int) -> None:
+        with self.session() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            for table in ("metric_minute", "visitor_day", "ip_day", "unique_hll_hour", "spider_minute", "recent_requests", "dimension_day", "history_import"):
+                connection.execute("DELETE FROM {} WHERE site_id=?".format(table), (int(site_id),))
     def update_history_import(
         self, site_id: int, result: Dict[str, Any], complete: bool = False
     ) -> None:
@@ -595,6 +712,13 @@ class Repository:
         )
         hll_precision = max(4, min(16, int(hll_precision)))
         unique_sketches: Dict[tuple, HyperLogLog] = {}
+        spider_stats: Dict[tuple, Dict[str, int]] = defaultdict(
+            lambda: {"requests": 0, "bytes": 0, "errors": 0}
+        )
+        request_rows = []
+        dimension_stats: Dict[tuple, Dict[str, int]] = defaultdict(
+            lambda: {"requests": 0, "bytes": 0, "errors": 0, "last_seen": 0}
+        )
         for event in events:
             minute = event.timestamp - (event.timestamp % 60)
             day = datetime.fromtimestamp(event.timestamp).strftime("%Y-%m-%d")
@@ -603,7 +727,30 @@ class Repository:
             item["pv"] += int(is_page_view(event, static_extensions))
             item["bytes"] += max(0, event.body_bytes)
             item["errors"] += int(400 <= event.status <= 599)
-            item["bots"] += int(spider_name(event.user_agent) is not None)
+            spider = spider_name(event.user_agent)
+            client = client_info(event.user_agent)
+            request_rows.append((
+                site_id, event.timestamp, event.remote_addr[:64], event.method[:16],
+                request_path(event.uri)[:2048], int(event.status), max(0, event.body_bytes),
+                event.referer[:2048], event.user_agent[:1024], client["browser"],
+                client["system"], client["device"], spider or "",
+            ))
+            for dimension, value in (("ip", event.remote_addr[:64]),
+                                     ("uri", request_path(event.uri)[:2048]),
+                                     ("browser", client["browser"]),
+                                     ("system", client["system"]),
+                                     ("device", client["device"])):
+                dimension_item = dimension_stats[(day, dimension, value)]
+                dimension_item["requests"] += 1
+                dimension_item["bytes"] += max(0, event.body_bytes)
+                dimension_item["errors"] += int(event.status >= 400)
+                dimension_item["last_seen"] = max(dimension_item["last_seen"], event.timestamp)
+            item["bots"] += int(spider is not None)
+            if spider is not None:
+                spider_item = spider_stats[(minute, spider)]
+                spider_item["requests"] += 1
+                spider_item["bytes"] += max(0, event.body_bytes)
+                spider_item["errors"] += int(400 <= event.status <= 599)
             hour = minute - (minute % 3600)
             for kind, value in (
                 ("uv", visitor_hash(event, privacy_salt)),
@@ -641,6 +788,37 @@ class Repository:
                 )
             for (hour, kind), sketch in unique_sketches.items():
                 self._store_hll(connection, site_id, hour, kind, sketch)
+            for (minute, spider), item in spider_stats.items():
+                connection.execute(
+                    """INSERT INTO spider_minute
+                       (site_id,minute_ts,spider,requests,body_bytes,errors)
+                       VALUES (?,?,?,?,?,?)
+                       ON CONFLICT(site_id,minute_ts,spider) DO UPDATE SET
+                           requests=requests+excluded.requests,
+                           body_bytes=body_bytes+excluded.body_bytes,
+                           errors=errors+excluded.errors""",
+                    (site_id, minute, spider, item["requests"], item["bytes"], item["errors"]),
+                )
+            connection.executemany(
+                """INSERT INTO recent_requests
+                   (site_id,timestamp,remote_addr,method,uri,status,body_bytes,referer,
+                    user_agent,browser,system,device,spider)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                request_rows,
+            )
+            for (day, dimension, value), item in dimension_stats.items():
+                connection.execute(
+                    """INSERT INTO dimension_day
+                       (site_id,day,dimension,value,requests,body_bytes,errors,last_seen)
+                       VALUES (?,?,?,?,?,?,?,?)
+                       ON CONFLICT(site_id,day,dimension,value) DO UPDATE SET
+                           requests=requests+excluded.requests,
+                           body_bytes=body_bytes+excluded.body_bytes,
+                           errors=errors+excluded.errors,
+                           last_seen=MAX(dimension_day.last_seen,excluded.last_seen)""",
+                    (site_id, day, dimension, value, item["requests"], item["bytes"],
+                     item["errors"], item["last_seen"]),
+                )
             if cursor is not None:
                 self._upsert_cursor(connection, site_id, canonical_log_path, cursor)
 
@@ -909,3 +1087,115 @@ class Repository:
             result.append(item)
             current += bucket_seconds
         return result
+
+    def get_spiders(
+        self, site_id: int, start_ts: int, end_ts: int, bucket_seconds: int
+    ) -> Dict[str, Any]:
+        """返回蜘蛛总览、分类排行和补零后的趋势。"""
+        with self.session() as connection:
+            rows = connection.execute(
+                """SELECT spider, SUM(requests) AS requests,
+                          SUM(body_bytes) AS body_bytes, SUM(errors) AS errors,
+                          MAX(minute_ts) AS last_seen
+                   FROM spider_minute
+                   WHERE site_id=? AND minute_ts>=? AND minute_ts<?
+                   GROUP BY spider ORDER BY requests DESC, spider ASC""",
+                (site_id, start_ts, end_ts),
+            ).fetchall()
+            trend_rows = connection.execute(
+                """SELECT (minute_ts / ?) * ? AS bucket, SUM(requests) AS requests
+                   FROM spider_minute
+                   WHERE site_id=? AND minute_ts>=? AND minute_ts<?
+                   GROUP BY bucket ORDER BY bucket""",
+                (bucket_seconds, bucket_seconds, site_id, start_ts, end_ts),
+            ).fetchall()
+        ranking = [dict(row) for row in rows]
+        trend_map = {int(row["bucket"]): int(row["requests"] or 0) for row in trend_rows}
+        trend = []
+        current = (start_ts // bucket_seconds) * bucket_seconds
+        while current < end_ts:
+            trend.append({"timestamp": current, "requests": trend_map.get(current, 0)})
+            current += bucket_seconds
+        total = sum(int(row["requests"] or 0) for row in ranking)
+        errors = sum(int(row["errors"] or 0) for row in ranking)
+        return {
+            "summary": {
+                "requests": total,
+                "types": len(ranking),
+                "body_bytes": sum(int(row["body_bytes"] or 0) for row in ranking),
+                "errors": errors,
+                "error_rate": round(errors * 100.0 / total, 2) if total else 0,
+            },
+            "ranking": ranking,
+            "trend": trend,
+        }
+
+    def cleanup_details(self, raw_before: int, error_before: int, analytics_before_day: str = "") -> int:
+        with self.session() as connection:
+            cursor = connection.execute(
+                """DELETE FROM recent_requests
+                   WHERE (status<400 AND timestamp<?) OR (status>=400 AND timestamp<?)""",
+                (raw_before, error_before),
+            )
+            if analytics_before_day:
+                connection.execute("DELETE FROM dimension_day WHERE day<?", (analytics_before_day,))
+        return int(cursor.rowcount or 0)
+
+    def get_client_stats(self, site_id: int, start_ts: int, end_ts: int) -> Dict[str, Any]:
+        result = {}
+        start_day = datetime.fromtimestamp(start_ts).strftime("%Y-%m-%d")
+        end_day = datetime.fromtimestamp(max(start_ts, end_ts - 1)).strftime("%Y-%m-%d")
+        with self.session() as connection:
+            for field in ("browser", "system", "device"):
+                rows = connection.execute(
+                    """SELECT value AS name, SUM(requests) AS requests,
+                              SUM(body_bytes) AS body_bytes
+                       FROM dimension_day WHERE site_id=? AND dimension=? AND day>=? AND day<=?
+                       GROUP BY value ORDER BY requests DESC""",
+                    (site_id, field, start_day, end_day),
+                ).fetchall()
+                result[field] = [dict(row) for row in rows]
+        return result
+
+    def get_rank(self, kind: str, site_id: int, start_ts: int, end_ts: int, limit: int = 100) -> List[Dict[str, Any]]:
+        start_day = datetime.fromtimestamp(start_ts).strftime("%Y-%m-%d")
+        end_day = datetime.fromtimestamp(max(start_ts, end_ts - 1)).strftime("%Y-%m-%d")
+        with self.session() as connection:
+            rows = connection.execute(
+                """SELECT value AS name, SUM(requests) AS requests, SUM(body_bytes) AS body_bytes,
+                          SUM(errors) AS errors, MAX(last_seen) AS last_seen
+                   FROM dimension_day WHERE site_id=? AND dimension=? AND day>=? AND day<=?
+                   GROUP BY value ORDER BY requests DESC, value ASC LIMIT ?""",
+                (site_id, kind, start_day, end_day, limit),
+            ).fetchall()
+        result = [dict(row) for row in rows]
+        if kind == "ip":
+            for row in result:
+                row.update(locate_ip(str(row.get("name") or "")))
+        return result
+
+    def get_requests(self, site_id: int, start_ts: int, end_ts: int, page: int = 1,
+                     page_size: int = 50, errors_only: bool = False, query: str = "",
+                     status_group: str = "") -> Dict[str, Any]:
+        clauses = ["site_id=?", "timestamp>=?", "timestamp<?"]
+        params: List[Any] = [site_id, start_ts, end_ts]
+        if errors_only:
+            clauses.append("status>=400")
+        if status_group == "4xx":
+            clauses.extend(["status>=400", "status<500"])
+        elif status_group == "5xx":
+            clauses.append("status>=500")
+        if query:
+            clauses.append("(uri LIKE ? OR remote_addr LIKE ? OR user_agent LIKE ?)")
+            needle = "%{}%".format(query[:100])
+            params.extend([needle, needle, needle])
+        where = " AND ".join(clauses)
+        with self.session() as connection:
+            total = connection.execute("SELECT COUNT(*) FROM recent_requests WHERE " + where, tuple(params)).fetchone()[0]
+            rows = connection.execute(
+                """SELECT id,timestamp,remote_addr,method,uri,status,body_bytes,referer,
+                          user_agent,browser,system,device,spider
+                   FROM recent_requests WHERE {} ORDER BY timestamp DESC LIMIT ? OFFSET ?""".format(where),
+                tuple(params) + (page_size, (page - 1) * page_size),
+            ).fetchall()
+        return {"items": [dict(row) for row in rows], "total": int(total), "page": page, "page_size": page_size}

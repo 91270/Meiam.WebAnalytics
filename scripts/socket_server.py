@@ -163,7 +163,11 @@ def main():
                     rejected += 1
                 else:
                     panel_site_id, event = parsed
-                    if is_excluded(event, config.get("excluded_paths", [])):
+                    if not config.get("enabled", True):
+                        rejected += 1
+                    elif is_excluded(event, config.get("excluded_paths", [])):
+                        rejected += 1
+                    elif not bool(config.get("enabled", True)):
                         rejected += 1
                     else:
                         if panel_site_id not in mapping:
@@ -227,6 +231,13 @@ def main():
                     },
                 )
                 last_health = now
+                if int(time.time()) % 3600 < 11:
+                    analytics_days = max(30, min(3650, int(config.get("analytics_retention_days", 90))))
+                    repository.cleanup_details(
+                        int(time.time()) - int(config.get("raw_retention_days", 7)) * 86400,
+                        int(time.time()) - int(config.get("error_retention_days", 30)) * 86400,
+                        time.strftime("%Y-%m-%d", time.localtime(time.time() - analytics_days * 86400)),
+                    )
     finally:
         processor.stop()
         repository.set_state(
