@@ -73,11 +73,24 @@ Nginx / Apache access log
 
 ### 安装
 
-1. 从 [Releases](https://github.com/91270/Meiam.WebAnalytics/releases) 下载最新 `WebAnalytics-*.zip`。
-2. 解压到 `/www/server/panel/plugin/WebAnalytics`。
-3. 以 root 身份执行：
+推荐直接通过宝塔面板导入：
+
+1. 从 [Releases](https://github.com/91270/Meiam.WebAnalytics/releases) 下载最新的 `WebAnalytics-*.zip`，不要修改压缩包内部目录结构。
+2. 打开宝塔面板的 **软件商店**。
+3. 进入 **第三方应用**，点击顶部的 **导入插件**。
+4. 选择下载的 ZIP 安装包并确认导入。
+5. 安装完成后，在第三方应用列表中找到“网站访问分析”，点击 **设置** 打开插件。
+
+宝塔导入后，插件代码安装在：
+
+```text
+/www/server/panel/plugin/WebAnalytics
+```
+
+通常不需要手动解压或运行安装脚本。仅在面板导入失败、需要调试安装流程时，才使用命令行方式：
 
 ```bash
+unzip WebAnalytics-*.zip -d /www/server/panel/plugin/
 cd /www/server/panel/plugin/WebAnalytics
 bash install.sh install
 ```
@@ -85,6 +98,10 @@ bash install.sh install
 安装后在宝塔面板中打开“网站访问分析”。首次启动会在后台恢复已有访问日志，不会阻塞实时请求采集。
 
 ### 升级
+
+优先下载新版 ZIP，然后在宝塔 **软件商店 → 第三方应用 → 导入插件** 中重新导入。升级过程会运行数据库迁移，统计数据位于独立持久目录，不会因覆盖插件代码而丢失。
+
+需要手动升级时：
 
 ```bash
 cd /www/server/panel/plugin/WebAnalytics
@@ -119,6 +136,8 @@ bash install.sh uninstall
 /www/server/panel/plugin/WebAnalytics    插件代码
 /www/server/webanalytics/data           持久数据
 /www/server/webanalytics/data/stats.db  SQLite 数据库
+/www/server/webanalytics/data/config.json  插件配置
+/etc/systemd/system/webanalytics.service   systemd 服务
 /tmp/webanalytics.sock                  实时采集 Socket
 ```
 
