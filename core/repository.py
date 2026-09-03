@@ -22,7 +22,7 @@ from .settings import DB_PATH
 from .site_discovery import SiteDefinition
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 @dataclass(frozen=True)
@@ -46,6 +46,9 @@ class Repository:
         connection.execute("PRAGMA synchronous=NORMAL")
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=15000")
+        connection.execute("PRAGMA cache_size=-32768")
+        connection.execute("PRAGMA temp_store=MEMORY")
+        connection.execute("PRAGMA mmap_size=134217728")
         return connection
 
     @contextmanager
@@ -84,9 +87,22 @@ class Repository:
         cls._ensure_column(
             connection, "metric_minute", "bot_requests", "INTEGER NOT NULL DEFAULT 0"
         )
+        cls._ensure_column(connection, "history_import", "mode", "TEXT NOT NULL DEFAULT 'initial'")
+        cls._ensure_column(connection, "history_import", "window_days", "INTEGER NOT NULL DEFAULT 30")
+        cls._ensure_column(connection, "history_import", "cutoff_ts", "INTEGER NOT NULL DEFAULT 0")
+        cls._ensure_column(connection, "history_import", "policy_version", "INTEGER NOT NULL DEFAULT 1")
 
     def initialize(self) -> None:
         with self.session() as connection:
+            version_table = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'"
+            ).fetchone()
+            if version_table is not None:
+                existing = connection.execute(
+                    "SELECT version FROM schema_version LIMIT 1"
+                ).fetchone()
+                if existing is not None and int(existing["version"]) > SCHEMA_VERSION:
+                    raise RuntimeError("不支持的数据库版本: {}".format(existing["version"]))
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS schema_version (
@@ -216,6 +232,10 @@ class Repository:
                     updated_at INTEGER NOT NULL DEFAULT 0,
                     completed_at INTEGER NOT NULL DEFAULT 0,
                     error TEXT NOT NULL DEFAULT '',
+                    mode TEXT NOT NULL DEFAULT 'initial',
+                    window_days INTEGER NOT NULL DEFAULT 30,
+                    cutoff_ts INTEGER NOT NULL DEFAULT 0,
+                    policy_version INTEGER NOT NULL DEFAULT 1,
                     FOREIGN KEY(site_id) REFERENCES sites(id) ON DELETE CASCADE
                 );
 
@@ -243,6 +263,7 @@ class Repository:
                 """
             )
             row = connection.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
+            original_version = int(row["version"]) if row is not None else 0
             if row is None:
                 self._migrate_exact_uniques(connection)
                 connection.execute(
@@ -290,8 +311,20 @@ class Repository:
                         (dimension,),
                     )
                 connection.execute("UPDATE schema_version SET version=?", (SCHEMA_VERSION,))
+            elif int(row["version"]) == 6:
+                connection.execute("UPDATE schema_version SET version=?", (SCHEMA_VERSION,))
             elif int(row["version"]) != SCHEMA_VERSION:
                 raise RuntimeError("不支持的数据库版本: {}".format(row["version"]))
+
+            if 0 < original_version < SCHEMA_VERSION:
+                now = int(time.time())
+                connection.execute(
+                    """INSERT OR IGNORE INTO history_import
+                       (site_id,status,started_at,updated_at,completed_at,mode,window_days,policy_version)
+                       SELECT DISTINCT site_id,'complete',?,?,?,'upgrade-preserved',30,1
+                       FROM metric_minute""",
+                    (now, now, now),
+                )
 
     @staticmethod
     def _migrate_exact_uniques(connection: sqlite3.Connection, precision: int = 10) -> None:
@@ -610,9 +643,9 @@ class Repository:
 
     def needs_history_import(self, site_id: int) -> bool:
         state = self.history_import_status(site_id)
-        return state is None or str(state.get("status")) != "complete"
+        return state is None or str(state.get("status")) not in {"complete", "preserved"}
 
-    def begin_history_import(self, site_id: int) -> bool:
+    def begin_history_import(self, site_id: int, window_days: int = 30, cutoff_ts: int = 0) -> bool:
         """首次开始返回 True；中断续跑返回 False。"""
         now = int(time.time())
         with self.session() as connection:
@@ -622,13 +655,15 @@ class Repository:
             if row is None:
                 connection.execute(
                     """INSERT INTO history_import
-                       (site_id,status,started_at,updated_at) VALUES (?,'running',?,?)""",
-                    (int(site_id), now, now),
+                       (site_id,status,started_at,updated_at,mode,window_days,cutoff_ts,policy_version)
+                       VALUES (?,'running',?,?,'initial',?,?,1)""",
+                    (int(site_id), now, now, int(window_days), int(cutoff_ts)),
                 )
                 return True
             connection.execute(
-                "UPDATE history_import SET status='running',updated_at=?,error='' WHERE site_id=?",
-                (now, int(site_id)),
+                """UPDATE history_import SET status='running',updated_at=?,error='',
+                   window_days=?,cutoff_ts=?,policy_version=1 WHERE site_id=?""",
+                (now, int(window_days), int(cutoff_ts), int(site_id)),
             )
         return False
 
@@ -640,11 +675,6 @@ class Repository:
             )
         return int(cursor.rowcount or 0) > 0
 
-    def clear_site_data(self, site_id: int) -> None:
-        with self.session() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            for table in ("metric_minute", "visitor_day", "ip_day", "unique_hll_hour", "spider_minute", "recent_requests", "dimension_day", "history_import"):
-                connection.execute("DELETE FROM {} WHERE site_id=?".format(table), (int(site_id),))
     def update_history_import(
         self, site_id: int, result: Dict[str, Any], complete: bool = False
     ) -> None:
@@ -706,6 +736,8 @@ class Repository:
         privacy_salt: str,
         static_extensions: Iterable[str],
         hll_precision: int = 10,
+        detail_cutoff_ts: int = 0,
+        error_detail_cutoff_ts: int = 0,
     ) -> None:
         minute_stats: Dict[int, Dict[str, int]] = defaultdict(
             lambda: {"requests": 0, "pv": 0, "bytes": 0, "errors": 0, "bots": 0}
@@ -719,6 +751,11 @@ class Repository:
         dimension_stats: Dict[tuple, Dict[str, int]] = defaultdict(
             lambda: {"requests": 0, "bytes": 0, "errors": 0, "last_seen": 0}
         )
+        path_cache: Dict[str, str] = {}
+        client_cache: Dict[str, Dict[str, str]] = {}
+        spider_cache: Dict[str, Optional[str]] = {}
+        ip_hash_cache: Dict[str, str] = {}
+        visitor_hash_cache: Dict[tuple, str] = {}
         for event in events:
             minute = event.timestamp - (event.timestamp % 60)
             day = datetime.fromtimestamp(event.timestamp).strftime("%Y-%m-%d")
@@ -727,16 +764,28 @@ class Repository:
             item["pv"] += int(is_page_view(event, static_extensions))
             item["bytes"] += max(0, event.body_bytes)
             item["errors"] += int(400 <= event.status <= 599)
-            spider = spider_name(event.user_agent)
-            client = client_info(event.user_agent)
-            request_rows.append((
-                site_id, event.timestamp, event.remote_addr[:64], event.method[:16],
-                request_path(event.uri)[:2048], int(event.status), max(0, event.body_bytes),
-                event.referer[:2048], event.user_agent[:1024], client["browser"],
-                client["system"], client["device"], spider or "",
-            ))
+            if event.uri not in path_cache:
+                path_cache[event.uri] = request_path(event.uri)[:2048]
+            path = path_cache[event.uri]
+            if event.user_agent not in client_cache:
+                client_cache[event.user_agent] = client_info(event.user_agent)
+                spider_cache[event.user_agent] = spider_name(event.user_agent)
+            client = client_cache[event.user_agent]
+            spider = spider_cache[event.user_agent]
+            keep_detail = not detail_cutoff_ts or event.timestamp >= int(detail_cutoff_ts)
+            keep_error = (
+                400 <= event.status <= 599
+                and (not error_detail_cutoff_ts or event.timestamp >= int(error_detail_cutoff_ts))
+            )
+            if keep_detail or keep_error:
+                request_rows.append((
+                    site_id, event.timestamp, event.remote_addr[:64], event.method[:16],
+                    path, int(event.status), max(0, event.body_bytes),
+                    event.referer[:2048], event.user_agent[:1024], client["browser"],
+                    client["system"], client["device"], spider or "",
+                ))
             for dimension, value in (("ip", event.remote_addr[:64]),
-                                     ("uri", request_path(event.uri)[:2048]),
+                                     ("uri", path),
                                      ("browser", client["browser"]),
                                      ("system", client["system"]),
                                      ("device", client["device"])):
@@ -752,9 +801,14 @@ class Repository:
                 spider_item["bytes"] += max(0, event.body_bytes)
                 spider_item["errors"] += int(400 <= event.status <= 599)
             hour = minute - (minute % 3600)
+            visitor_key = (event.remote_addr, event.user_agent, event.cookie)
+            if visitor_key not in visitor_hash_cache:
+                visitor_hash_cache[visitor_key] = visitor_hash(event, privacy_salt)
+            if event.remote_addr not in ip_hash_cache:
+                ip_hash_cache[event.remote_addr] = ip_hash(event, privacy_salt)
             for kind, value in (
-                ("uv", visitor_hash(event, privacy_salt)),
-                ("ip", ip_hash(event, privacy_salt)),
+                ("uv", visitor_hash_cache[visitor_key]),
+                ("ip", ip_hash_cache[event.remote_addr]),
             ):
                 key = (hour, kind)
                 if key not in unique_sketches:
@@ -763,9 +817,8 @@ class Repository:
 
         with self.session() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            for minute, item in minute_stats.items():
-                connection.execute(
-                    """
+            connection.executemany(
+                """
                     INSERT INTO metric_minute(site_id, minute_ts, requests, pv, body_bytes,
                                               errors, bot_requests)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -776,7 +829,7 @@ class Repository:
                         errors=errors+excluded.errors,
                         bot_requests=bot_requests+excluded.bot_requests
                     """,
-                    (
+                [(
                         site_id,
                         minute,
                         item["requests"],
@@ -784,21 +837,21 @@ class Repository:
                         item["bytes"],
                         item["errors"],
                         item["bots"],
-                    ),
-                )
+                    ) for minute, item in minute_stats.items()],
+            )
             for (hour, kind), sketch in unique_sketches.items():
                 self._store_hll(connection, site_id, hour, kind, sketch)
-            for (minute, spider), item in spider_stats.items():
-                connection.execute(
-                    """INSERT INTO spider_minute
+            connection.executemany(
+                """INSERT INTO spider_minute
                        (site_id,minute_ts,spider,requests,body_bytes,errors)
                        VALUES (?,?,?,?,?,?)
                        ON CONFLICT(site_id,minute_ts,spider) DO UPDATE SET
                            requests=requests+excluded.requests,
                            body_bytes=body_bytes+excluded.body_bytes,
                            errors=errors+excluded.errors""",
-                    (site_id, minute, spider, item["requests"], item["bytes"], item["errors"]),
-                )
+                [(site_id, minute, spider, item["requests"], item["bytes"], item["errors"])
+                 for (minute, spider), item in spider_stats.items()],
+            )
             connection.executemany(
                 """INSERT INTO recent_requests
                    (site_id,timestamp,remote_addr,method,uri,status,body_bytes,referer,
@@ -806,9 +859,8 @@ class Repository:
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 request_rows,
             )
-            for (day, dimension, value), item in dimension_stats.items():
-                connection.execute(
-                    """INSERT INTO dimension_day
+            connection.executemany(
+                """INSERT INTO dimension_day
                        (site_id,day,dimension,value,requests,body_bytes,errors,last_seen)
                        VALUES (?,?,?,?,?,?,?,?)
                        ON CONFLICT(site_id,day,dimension,value) DO UPDATE SET
@@ -816,9 +868,10 @@ class Repository:
                            body_bytes=body_bytes+excluded.body_bytes,
                            errors=errors+excluded.errors,
                            last_seen=MAX(dimension_day.last_seen,excluded.last_seen)""",
-                    (site_id, day, dimension, value, item["requests"], item["bytes"],
-                     item["errors"], item["last_seen"]),
-                )
+                [(site_id, day, dimension, value, item["requests"], item["bytes"],
+                  item["errors"], item["last_seen"])
+                 for (day, dimension, value), item in dimension_stats.items()],
+            )
             if cursor is not None:
                 self._upsert_cursor(connection, site_id, canonical_log_path, cursor)
 
@@ -853,6 +906,12 @@ class Repository:
                 """,
                 (key, serialized, int(time.time())),
             )
+
+    def optimize_after_history_import(self) -> None:
+        """恢复结束后更新查询规划信息，并温和回收 WAL；不执行阻塞式 VACUUM。"""
+        with self.session() as connection:
+            connection.execute("PRAGMA optimize")
+            connection.execute("PRAGMA wal_checkpoint(PASSIVE)")
 
     def get_health(self) -> Dict[str, Any]:
         state: Dict[str, Any] = {}

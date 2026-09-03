@@ -16,16 +16,13 @@ service_file="/etc/systemd/system/${service_name}"
 migrate_persistent_data() {
     mkdir -p "${data_path}"
     if [ ! -f "${data_path}/.external-data-v1" ] && [ -d "${legacy_data_path}" ] && [ ! -L "${legacy_data_path}" ]; then
-        cp -a "${legacy_data_path}/." "${data_path}/"
+        # 只在外置库不存在时迁移旧版内置数据；绝不以旧库覆盖已经存在的持久库。
+        if [ ! -e "${data_path}/stats.db" ]; then
+            cp -an "${legacy_data_path}/." "${data_path}/"
+        fi
     fi
     touch "${data_path}/.external-data-v1"
     chmod 700 "${persistent_root}" "${data_path}"
-}
-
-reset_statistics_database() {
-    # 兼容从曾经“卸载后保留数据”的旧测试版重装：安装动作始终以日志为准重建。
-    rm -f "${data_path}/stats.db" "${data_path}/stats.db-wal" \
-        "${data_path}/stats.db-shm" "${data_path}/collector.lock"
 }
 
 detect_python() {
@@ -62,7 +59,9 @@ Install() {
         systemctl stop "${service_name}" >/dev/null 2>&1 || true
     fi
     migrate_persistent_data
-    reset_statistics_database
+    existing_database=0
+    [ -s "${data_path}/stats.db" ] && existing_database=1
+    rm -f "${data_path}/collector.lock"
     chmod 700 "${plugin_path}/scripts/collect.py" "${plugin_path}/scripts/init_db.py" \
         "${plugin_path}/scripts/socket_server.py" "${plugin_path}/scripts/configure_nginx.py" \
         "${plugin_path}/scripts/bootstrap_data.py"
@@ -76,7 +75,11 @@ Install() {
         exit 1
     fi
     echo "================================================"
-    echo "安装完成：历史日志正在后台重建，Nginx/Apache 新请求将实时写入统计服务"
+    if [ "${existing_database}" -eq 1 ]; then
+        echo "安装完成：已复用统计数据库和采集游标，仅未完成或新增网站会继续恢复历史数据"
+    else
+        echo "安装完成：首次安装正在后台恢复历史日志，Nginx/Apache 新请求将实时写入统计服务"
+    fi
 }
 
 Update() {
@@ -103,10 +106,11 @@ Uninstall() {
         rm -f "${service_file}"
         systemctl daemon-reload
     fi
-    rm -f /etc/cron.d/webanalytics /etc/cron.d/webanalytics.tmp /tmp/webanalytics.sock
+    rm -f /etc/cron.d/webanalytics /etc/cron.d/webanalytics.tmp /tmp/webanalytics.sock \
+        "${data_path}/collector.lock" "${data_path}/configure.lock"
     rm -rf "${plugin_path}"
     rm -rf "${persistent_root}"
-    echo "卸载完成，统计数据库已删除；原始网站日志未被修改，重装时将据此重建"
+    echo "卸载完成：统计数据库与配置已删除；网站原始日志未被修改"
 }
 
 case "${1:-}" in

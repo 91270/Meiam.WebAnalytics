@@ -193,12 +193,13 @@ class WebAnalytics_main:
         internal_site_id = int(site.get("id") or 0)
         received_for_site = int(received_map.get(str(internal_site_id), 0) or 0)
         initial_backfill = service.get("initial_backfill") or {}
+        history_progress = health.get("history_backfill_progress") or initial_backfill
         last_run = health.get("last_run") or {}
         backfill_site_ids = {
             int(value)
             for value in (
-                initial_backfill.get("site_ids")
-                or initial_backfill.get("requested_site_ids")
+                history_progress.get("site_ids")
+                or history_progress.get("requested_site_ids")
                 or []
             )
             if str(value).lstrip("-").isdigit()
@@ -211,7 +212,7 @@ class WebAnalytics_main:
             "web_server": web_server,
             "received_for_site": received_for_site,
             "backfill_for_site": (
-                service.get("phase") == "backfill"
+                str(history_progress.get("status")) == "running"
                 and internal_site_id in backfill_site_ids
             ),
             "vhost": str(vhost_path),
@@ -223,6 +224,7 @@ class WebAnalytics_main:
             "history_import": (last_run.get("site_results") or {}).get(
                 str(internal_site_id), {}
             ),
+            "history_progress": history_progress,
         }
 
     def get_bootstrap(self, args):
@@ -457,16 +459,6 @@ class WebAnalytics_main:
             return self._ok({"site_id": site_id, "enabled": enabled}, "网站采集状态已更新")
         except Exception as error:
             return self._error("更新网站采集状态失败：{}".format(str(error)[:300]))
-
-    def clear_data(self, args):
-        try:
-            if str(_arg(args, "confirm", "")) != "CLEAR":
-                return self._error("清理数据需要确认标记 CLEAR")
-            site_id = _bounded_int(_arg(args, "site_id", 0), 0, 1, 2147483647)
-            self._repo().clear_site_data(site_id)
-            return self._ok({"site_id": site_id}, "网站统计数据已清理")
-        except Exception as error:
-            return self._error("清理数据失败：{}".format(str(error)[:300]))
 
     def export_csv(self, args):
         response = self.get_errors(args) if str(_arg(args, "type", "requests")) == "errors" else self.get_requests(args)

@@ -178,6 +178,42 @@ class CollectorTests(unittest.TestCase):
         batches = list(_read_batches(self.log_path, 3, 100, True))
         self.assertEqual(batches[0][0], ["second-line\n", "third-line\n"])
 
+    def test_large_history_batch_uses_parallel_parser_and_single_writer(self):
+        self.log_path.write_text(
+            line("192.0.2.9", "02/Sep/2026:12:00:00 +0800", "/bulk") * 10000,
+            encoding="utf-8",
+        )
+        calls = []
+
+        class ImmediatePool:
+            def __init__(self, max_workers, mp_context):
+                calls.append(max_workers)
+
+            def map(self, function, chunks):
+                return map(function, chunks)
+
+            def shutdown(self, wait=True):
+                return None
+
+        config = dict(self.config)
+        config.update({
+            "full_history": True,
+            "batch_size": 10000,
+            "history_parse_workers": 2,
+            "detail_cutoff_ts": 2000000000,
+            "error_detail_cutoff_ts": 2000000000,
+        })
+        with patch("WebAnalytics.core.collector.ProcessPoolExecutor", ImmediatePool):
+            result = collect_site(
+                self.repository, self.site_id, self.site, config, float("inf")
+            )
+        self.assertEqual(result["events"], 10000)
+        self.assertEqual(calls, [2])
+        self.assertEqual(
+            self.repository.get_overview(self.site_id, 0, 2000000000)["requests"],
+            10000,
+        )
+
     def test_full_history_reads_rotated_gzip_and_current_logs_once(self):
         rotated_plain = self.root / "example.test.log.2"
         rotated_gzip = self.root / "example.test.log.1.gz"
@@ -279,6 +315,30 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(result["status"], "complete")
         self.assertEqual(result["events"], 1)
         self.assertFalse(self.repository.needs_history_import(self.site_id))
+        progress = self.repository.get_health()["history_backfill_progress"]
+        self.assertEqual(progress["status"], "complete")
+        self.assertEqual(progress["percent"], 100)
+        self.assertEqual(progress["events"], 1)
+        self.assertTrue(any("恢复完成" in item["message"] for item in progress["logs"]))
+
+    def test_history_backfill_only_imports_recent_thirty_days(self):
+        self.log_path.write_text(
+            line("203.0.113.8", "01/Jul/2026:12:00:00 +0800", "/too-old")
+            + line("203.0.113.9", "02/Sep/2026:12:00:00 +0800", "/recent"),
+            encoding="utf-8",
+        )
+        fixed_now = datetime.fromisoformat("2026-09-03T12:00:00+08:00").timestamp()
+        with patch(
+            "WebAnalytics.core.collector.Repository", return_value=self.repository
+        ), patch(
+            "WebAnalytics.core.collector.discover_sites", return_value=[self.site]
+        ), patch("WebAnalytics.core.collector.time.time", return_value=fixed_now):
+            result = _run_history_backfill_unlocked(self.config)
+        self.assertEqual(result["events"], 1)
+        self.assertEqual(result["rejected"], 1)
+        state = self.repository.history_import_status(self.site_id)
+        self.assertEqual(state["window_days"], 30)
+        self.assertEqual(state["cutoff_ts"], int(fixed_now) - 30 * 86400)
 
 
 if __name__ == "__main__":

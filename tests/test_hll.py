@@ -12,6 +12,29 @@ from WebAnalytics.core.site_discovery import SiteDefinition
 
 
 class HyperLogLogTests(unittest.TestCase):
+    def test_history_batch_keeps_seven_day_details_and_thirty_day_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Repository(Path(directory) / "stats.db")
+            repository.initialize()
+            site_id = repository.register_site(
+                SiteDefinition(13, "retention.test", "/srv/retention", "/logs/retention.log")
+            )
+            events = [
+                AccessEvent(1000, "1.1.1.1", "GET", "/old", "HTTP/1.1", 200, 10, "", "Browser"),
+                AccessEvent(1100, "1.1.1.2", "GET", "/old-error", "HTTP/1.1", 404, 20, "", "Browser"),
+                AccessEvent(2000, "1.1.1.3", "GET", "/recent", "HTTP/1.1", 200, 30, "", "Browser"),
+            ]
+            repository.record_batch(
+                site_id, "/logs/retention.log", None, events, "salt", (),
+                detail_cutoff_ts=1500, error_detail_cutoff_ts=500,
+            )
+            details = repository.get_requests(site_id, 0, 3000)
+            errors = repository.get_requests(site_id, 0, 3000, errors_only=True)
+            overview = repository.get_overview(site_id, 0, 3000)
+            self.assertEqual(details["total"], 2)
+            self.assertEqual(errors["total"], 1)
+            self.assertEqual(overview["requests"], 3)
+
     def test_spider_dimensions_are_recorded_and_ranked(self):
         with tempfile.TemporaryDirectory() as directory:
             repository = Repository(Path(directory) / "stats.db")
@@ -86,6 +109,28 @@ class HyperLogLogTests(unittest.TestCase):
                     (site_id, 1788341400, 1, 1, 1287, 0, 0),
                 )
             repository.initialize()
+            self.assertFalse(repository.needs_history_import(site_id))
+
+    def test_schema_six_upgrade_preserves_existing_statistics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Repository(Path(directory) / "stats.db")
+            repository.initialize()
+            site_id = repository.register_site(
+                SiteDefinition(12, "upgrade-six.test", "/srv/upgrade-six", "/logs/upgrade-six.log")
+            )
+            with repository.session() as connection:
+                connection.execute("UPDATE schema_version SET version=6")
+                connection.execute("DELETE FROM history_import WHERE site_id=?", (site_id,))
+                connection.execute(
+                    """INSERT INTO metric_minute
+                       (site_id,minute_ts,requests,pv,body_bytes,errors,bot_requests)
+                       VALUES (?,?,?,?,?,?,?)""",
+                    (site_id, 1788341400, 1, 1, 1287, 0, 0),
+                )
+            repository.initialize()
+            state = repository.history_import_status(site_id)
+            self.assertEqual(state["status"], "complete")
+            self.assertEqual(state["mode"], "upgrade-preserved")
             self.assertFalse(repository.needs_history_import(site_id))
 
     def test_small_cardinality_and_serialization(self):

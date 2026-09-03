@@ -81,7 +81,12 @@ def main():
     def initial_backfill(site_ids):
         nonlocal backfill_state
         try:
-            result = run_history_backfill(dict(config), site_ids)
+            def update_progress(progress):
+                nonlocal backfill_state
+                backfill_state = dict(progress)
+                backfill_state["site_ids"] = sorted(site_ids)
+
+            result = run_history_backfill(dict(config), site_ids, update_progress)
             result["requested_site_ids"] = sorted(site_ids)
             backfill_state = result
         except Exception as error:

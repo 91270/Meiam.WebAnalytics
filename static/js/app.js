@@ -311,14 +311,14 @@
             var labelValue = maxValue * (4 - gridIndex) / 4;
             grid += '<line class="wa-grid-line" x1="' + padding.left + '" y1="' + y + '" x2="' + (width - padding.right) + '" y2="' + y + '"/>';
             var axisLabel = metric.bytes ? formatBytes(labelValue) : (metric.decimal ? labelValue.toFixed(2) : formatNumber(Math.round(labelValue)));
-            yLabels += '<text x="43" y="' + (y + 4) + '" text-anchor="end" fill="#8f9aaa" font-size="11">' + escapeHtml(axisLabel) + '</text>';
+            yLabels += '<text x="43" y="' + (y + 4) + '" text-anchor="end" fill="#7f8c9d" font-size="12">' + escapeHtml(axisLabel) + '</text>';
         }
         var xLabels = '';
         var labelStep = Math.max(1, Math.ceil(count / 9));
         labels.forEach(function (label, index) {
             if (index % labelStep !== 0 && index !== count - 1) return;
             var x = padding.left + (count === 1 ? 0 : index * (width - padding.left - padding.right) / (count - 1));
-            xLabels += '<text x="' + x + '" y="289" text-anchor="middle" fill="#8f9aaa" font-size="11">' + escapeHtml(label) + '</text>';
+            xLabels += '<text x="' + x + '" y="289" text-anchor="middle" fill="#7f8c9d" font-size="12">' + escapeHtml(label) + '</text>';
         });
         var areaPath = currentPath + ' L' + currentPoints[currentPoints.length - 1].x.toFixed(1) + ',' + baseline
             + ' L' + currentPoints[0].x.toFixed(1) + ',' + baseline + ' Z';
@@ -357,10 +357,11 @@
     function renderHealth(health, diagnostics) {
         var badge = $('#wa-health');
         var run = health && health.realtime_service;
+        var progress = (diagnostics && diagnostics.history_progress) || {};
         badge.removeClass('is-good is-warn');
         if (!diagnostics || !diagnostics.service_ready || !run || !run.running) return badge.addClass('is-warn').html('<i></i>实时服务未运行');
         if (!diagnostics.socket_ready) return badge.addClass('is-warn').html('<i></i>Socket 未就绪');
-        if (diagnostics.backfill_for_site) return badge.addClass('is-warn').html('<i></i>正在恢复历史数据');
+        if (progress.status === 'running') return badge.addClass('is-warn').html('<i></i>正在恢复历史数据');
         if (!diagnostics.webserver_configured && !diagnostics.nginx_configured) return badge.addClass('is-warn').html('<i></i>站点尚未接入');
         var queue = diagnostics.queue || {};
         if (Number(queue.write_errors || 0) > 0 || Number(queue.dropped || 0) > 0) return badge.addClass('is-warn').html('<i></i>采集队列异常');
@@ -404,6 +405,39 @@
         }
     }
 
+    function renderHistoryProgress(data) {
+        var progress = ((data.diagnostics || {}).history_progress) || {};
+        var status = String(progress.status || '');
+        var badge = $('#wa-health');
+        badge.find('.wa-history-popover').remove();
+        if (status !== 'running') return;
+        var percent = Math.max(0, Math.min(100, Number(progress.percent || 0)));
+        var file = String(progress.current_file || '').replace(/\\/g, '/').split('/').pop();
+        var stage = (progress.site_name ? progress.site_name : '准备中') + (file ? ' · ' + file : '');
+        var logs = (progress.logs || []).slice(-4).reverse(), logHtml = '';
+        logs.forEach(function (entry) {
+            var date = new Date(Number(entry.time || 0) * 1000);
+            var clock = String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0') + ':' + String(date.getSeconds()).padStart(2, '0');
+            logHtml += '<div class="wa-history-popover-log is-' + escapeHtml(entry.level || 'info') + '"><time>' + clock + '</time><span title="' + escapeHtml(entry.message || '') + '">' + escapeHtml(entry.message || '') + '</span></div>';
+        });
+        var stat = function (label, value) {
+            return '<div class="wa-history-popover-stat"><span>' + label + '</span><b>' + value + '</b></div>';
+        };
+        badge.append('<div class="wa-history-popover" role="tooltip">'
+            + '<div class="wa-history-popover-head"><div><strong>历史数据恢复</strong><span title="' + escapeHtml(stage) + '">' + escapeHtml(stage) + '</span></div><b>' + percent.toFixed(percent % 1 ? 1 : 0) + '%</b></div>'
+            + '<div class="wa-history-popover-track"><i style="width:' + percent + '%"></i></div>'
+            + '<div class="wa-history-popover-stats">'
+            + stat('网站进度', formatNumber(progress.completed_sites) + ' / ' + formatNumber(progress.total_sites))
+            + stat('文件进度', formatNumber(progress.file_index) + ' / ' + formatNumber(progress.file_count))
+            + stat('读取行数', formatNumber(progress.lines))
+            + stat('成功导入', formatNumber(progress.events))
+            + stat('忽略行数', formatNumber(progress.rejected))
+            + stat('解析进程', formatNumber(progress.parse_workers || 1))
+            + '</div><div class="wa-history-popover-logs">'
+            + (logHtml || '<div class="wa-history-popover-log"><span>等待恢复任务输出日志…</span></div>')
+            + '</div><div class="wa-history-popover-foot">恢复在后台自动执行，不影响实时请求接收；中断后将从已提交位置继续。</div></div>');
+    }
+
     function render(data) {
         state.data = data;
         state.siteId = Number(data.selected_site_id || 0);
@@ -413,6 +447,7 @@
         renderChart();
         renderHealth(data.health || {}, data.diagnostics || {});
         renderDiagnostics(data);
+        renderHistoryProgress(data);
         $('#wa-generated-at').text('数据生成于 ' + new Date(Number(data.generated_at || Date.now() / 1000) * 1000).toLocaleString('zh-CN'));
         $('#wa-dashboard').prop('hidden', false);
         showPage('overview');
@@ -507,7 +542,7 @@
         var step = Math.max(1, Math.ceil(points.length / 6));
         points.forEach(function (point, index) {
             if (index % step === 0 || index === points.length - 1) {
-                labels += '<text x="' + point.x + '" y="137" text-anchor="middle" fill="#929dac" font-size="9">' + escapeHtml(chartTimeLabel(rows[index].timestamp, Number((state.spidersData.range || {}).bucket || 3600), false)) + '</text>';
+                labels += '<text x="' + point.x + '" y="137" text-anchor="middle" fill="#7f8c9d" font-size="11">' + escapeHtml(chartTimeLabel(rows[index].timestamp, Number((state.spidersData.range || {}).bucket || 3600), false)) + '</text>';
             }
             if (point.value > 0) dots += '<circle cx="' + point.x + '" cy="' + point.y + '" r="2.5" fill="#fff" stroke="#7b61d1" stroke-width="1.5"><title>' + formatNumber(point.value) + ' 次</title></circle>';
         });
@@ -652,13 +687,15 @@
         else loadModule(state.page);
     }
 
-    function loadDashboard() {
+    function loadDashboard(silent) {
         var requestId = ++state.dashboardRequest;
-        setLoading(true, '正在读取网站统计...');
-        showNotice('');
+        if (!silent) {
+            setLoading(true, '正在读取网站统计...');
+            showNotice('');
+        }
         requestPlugin('get_bootstrap', { site_id: state.siteId, period: state.period }, function (response) {
             if (requestId !== state.dashboardRequest) return;
-            setLoading(false);
+            if (!silent) setLoading(false);
             if (!response || !response.success) {
                 showNotice(response && response.message ? response.message : '无法读取插件数据');
                 return;
@@ -784,13 +821,6 @@
         }, function (response) { showNotice(response && response.message ? response.message : '设置保存完成'); });
     });
 
-    $('#wa-clear-data').on('click', function () {
-        if (!window.confirm('确定清理当前网站的全部插件统计数据？原始网站日志不会删除。')) return;
-        requestPlugin('clear_data', { site_id: state.siteId, confirm: 'CLEAR' }, function (response) {
-            showNotice(response && response.message ? response.message : '清理完成');
-        });
-    });
-
     $('[data-export]').on('click', function () {
         var kind = String($(this).data('export'));
         var data = kind === 'report' ? state.moduleData.reports : state.moduleData[kind];
@@ -864,4 +894,8 @@
     fitPluginLayer();
     $(window).off('resize.webanalytics').on('resize.webanalytics', fitPluginLayer);
     loadDashboard();
+    window.setInterval(function () {
+        var progress = (((state.data || {}).diagnostics || {}).history_progress) || {};
+        if (state.page === 'overview' && progress.status === 'running' && !state.loading) loadDashboard(true);
+    }, 3000);
 })();

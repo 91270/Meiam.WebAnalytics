@@ -6,16 +6,40 @@ from __future__ import annotations
 
 import os
 import gzip
+import multiprocessing
 import tarfile
 import time
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from .metrics import is_excluded
 from .parsers import AccessEvent, parse_access_line
 from .repository import FileCursor, Repository
 from .settings import DATA_DIR, load_config
 from .site_discovery import SiteDefinition, discover_sites
+
+HISTORY_IMPORT_DAYS = 30
+HISTORY_DETAIL_DAYS = 7
+MAX_PARSE_WORKERS = 4
+
+
+def _parse_line_chunk(payload) -> Tuple[List[AccessEvent], int]:
+    """进程安全的日志解析单元；解析进程不接触 SQLite。"""
+    lines, excluded_paths, cutoff_ts = payload
+    events: List[AccessEvent] = []
+    rejected = 0
+    for line in lines:
+        event = parse_access_line(line)
+        if (
+            event is None
+            or is_excluded(event, excluded_paths)
+            or (cutoff_ts and event.timestamp < cutoff_ts)
+        ):
+            rejected += 1
+        else:
+            events.append(event)
+    return events, rejected
 
 
 def _stat_cursor(path: Path, offset: int) -> FileCursor:
@@ -191,6 +215,7 @@ def collect_site(
     site: SiteDefinition,
     config: Dict[str, object],
     deadline: float,
+    progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
 ) -> Dict[str, int]:
     canonical = Path(site.log_path)
     full_history = bool(config.get("full_history", False))
@@ -222,41 +247,100 @@ def collect_site(
         initial_offset,
         include_history=full_history,
     )
-    batch_size = max(100, min(20000, int(config.get("batch_size", 5000))))
+    history_cutoff_ts = max(0, int(config.get("history_cutoff_ts", 0) or 0))
+    if full_history and history_cutoff_ts:
+        sources = [
+            item for item in sources
+            if item[0] == canonical or int(item[0].stat().st_mtime) >= history_cutoff_ts
+        ]
+    batch_size = max(100, min(50000, int(config.get("batch_size", 5000))))
     excluded_paths = config.get("excluded_paths", [])
     static_extensions = config.get("static_extensions", [])
     salt = str(config["privacy_salt"])
-
-    for source, offset in sources:
-        discard_partial = (
-            cursor is None
-            and initial_offset > 0
-            and source == canonical
-            and offset == initial_offset
+    detail_cutoff_ts = max(0, int(config.get("detail_cutoff_ts", 0) or 0))
+    error_detail_cutoff_ts = max(0, int(config.get("error_detail_cutoff_ts", 0) or 0))
+    parse_workers = 1
+    if full_history:
+        parse_workers = max(
+            1,
+            min(MAX_PARSE_WORKERS, int(config.get("history_parse_workers", max(1, min(4, (os.cpu_count() or 2) - 1))))),
         )
-        for lines, next_offset in _read_batches(
-            source, offset, batch_size, discard_partial
-        ):
-            events: List[AccessEvent] = []
-            for line in lines:
-                result["lines"] += 1
-                event = parse_access_line(line)
-                if event is None or is_excluded(event, excluded_paths):
-                    result["rejected"] += 1
-                    continue
-                events.append(event)
-            result["events"] += len(events)
-            repository.record_batch(
-                site_id=site_id,
-                canonical_log_path=str(canonical),
-                cursor=_stat_cursor(source, next_offset),
-                events=events,
-                privacy_salt=salt,
-                static_extensions=static_extensions,
-                hll_precision=int(config.get("hll_precision", 10)),
+    executor = None
+
+    source_count = len(sources)
+    try:
+        for source_index, (source, offset) in enumerate(sources):
+            discard_partial = (
+                cursor is None
+                and initial_offset > 0
+                and source == canonical
+                and offset == initial_offset
             )
-            if time.monotonic() >= deadline:
-                return result
+            for lines, next_offset in _read_batches(
+                source, offset, batch_size, discard_partial
+            ):
+                result["lines"] += len(lines)
+                events: List[AccessEvent] = []
+                rejected = 0
+                if parse_workers > 1 and len(lines) >= 10000:
+                    chunk_size = max(2500, (len(lines) + parse_workers - 1) // parse_workers)
+                    chunks = [
+                        (lines[index:index + chunk_size], excluded_paths, history_cutoff_ts)
+                        for index in range(0, len(lines), chunk_size)
+                    ]
+                    try:
+                        if executor is None:
+                            executor = ProcessPoolExecutor(
+                                max_workers=parse_workers,
+                                mp_context=multiprocessing.get_context("spawn"),
+                            )
+                        for parsed, chunk_rejected in executor.map(_parse_line_chunk, chunks):
+                            events.extend(parsed)
+                            rejected += chunk_rejected
+                    except Exception:
+                        if executor is not None:
+                            executor.shutdown(wait=True)
+                            executor = None
+                        events, rejected = _parse_line_chunk((lines, excluded_paths, history_cutoff_ts))
+                        parse_workers = 1
+                else:
+                    events, rejected = _parse_line_chunk((lines, excluded_paths, history_cutoff_ts))
+                result["rejected"] += rejected
+                result["events"] += len(events)
+                repository.record_batch(
+                    site_id=site_id,
+                    canonical_log_path=str(canonical),
+                    cursor=_stat_cursor(source, next_offset),
+                    events=events,
+                    privacy_salt=salt,
+                    static_extensions=static_extensions,
+                    hll_precision=int(config.get("hll_precision", 10)),
+                    detail_cutoff_ts=detail_cutoff_ts,
+                    error_detail_cutoff_ts=error_detail_cutoff_ts,
+                )
+                if progress_callback is not None:
+                    try:
+                        source_size = max(1, int(source.stat().st_size))
+                    except OSError:
+                        source_size = max(1, int(next_offset))
+                    progress_callback(
+                        {
+                            "source": str(source),
+                            "source_index": source_index + 1,
+                            "source_count": source_count,
+                            "source_offset": int(next_offset),
+                            "source_size": source_size,
+                            "lines": int(result["lines"]),
+                            "events": int(result["events"]),
+                            "rejected": int(result["rejected"]),
+                            "parse_workers": parse_workers,
+                        }
+                    )
+                if time.monotonic() >= deadline:
+                    return result
+    finally:
+        if executor is not None:
+            executor.shutdown(wait=True)
     result["complete"] = True
     return result
 
@@ -321,7 +405,22 @@ def _run_once_unlocked(config: Optional[Dict[str, object]] = None) -> Dict[str, 
                 deadline,
                 time.monotonic() + max(0.25, remaining_seconds / remaining_sites),
             )
-            site_result = collect_site(repository, site_id, site, config, site_deadline)
+            callback = config.get("_progress_callback")
+            site_result = collect_site(
+                repository,
+                site_id,
+                site,
+                config,
+                site_deadline,
+                (lambda progress, sid=site_id, current=site: callback({
+                    **progress,
+                    "site_id": sid,
+                    "site_index": index + 1,
+                    "site_count": len(candidates),
+                    "site_name": current.name,
+                    "log_path": current.log_path,
+                })) if callable(callback) else None,
+            )
             for key in ("lines", "events", "rejected"):
                 summary[key] = int(summary[key]) + site_result[key]
             completion_key = (
@@ -356,9 +455,12 @@ def _run_once_unlocked(config: Optional[Dict[str, object]] = None) -> Dict[str, 
 def _run_history_backfill_unlocked(
     config: Optional[Dict[str, object]] = None,
     requested_site_ids: Optional[Iterable[int]] = None,
+    progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
 ) -> Dict[str, object]:
     """完整且可续跑地导入站点现存日志（含轮转及 gzip）。"""
     backfill_config = dict(config or load_config())
+    history_days = HISTORY_IMPORT_DAYS
+    history_cutoff_ts = int(time.time()) - history_days * 86400
     repository = Repository()
     repository.initialize()
     discovered = list(discover_sites(backfill_config))
@@ -370,7 +472,7 @@ def _run_history_backfill_unlocked(
             continue
         if not repository.needs_history_import(site_id):
             continue
-        if repository.begin_history_import(site_id):
+        if repository.begin_history_import(site_id, history_days, history_cutoff_ts):
             repository.clear_cursor(site_id)
         pending.append(site_id)
 
@@ -393,6 +495,69 @@ def _run_history_backfill_unlocked(
     if not pending:
         return total
 
+    logs: List[Dict[str, object]] = []
+    last_source = ""
+    last_publish = 0.0
+    round_base = {"lines": 0, "events": 0, "rejected": 0}
+    round_site_progress: Dict[int, Dict[str, object]] = {}
+
+    def publish(progress: Optional[Dict[str, object]] = None, force: bool = False) -> None:
+        nonlocal last_source, last_publish
+        progress = progress or {}
+        progress_site_id = int(progress.get("site_id") or 0)
+        if progress_site_id:
+            round_site_progress[progress_site_id] = progress
+        now_monotonic = time.monotonic()
+        source = str(progress.get("source") or "")
+        if source and source != last_source:
+            last_source = source
+            logs.append({
+                "time": int(time.time()),
+                "level": "info",
+                "message": "开始读取 {}".format(source),
+            })
+            force = True
+        if not force and now_monotonic - last_publish < 1.0:
+            return
+        source_count = max(1, int(progress.get("source_count") or 1))
+        source_index = max(1, int(progress.get("source_index") or 1))
+        source_size = max(1, int(progress.get("source_size") or 1))
+        source_ratio = min(1.0, int(progress.get("source_offset") or 0) / source_size)
+        site_ratio = min(1.0, ((source_index - 1) + source_ratio) / source_count)
+        completed_sites = len(total["completed_site_ids"])
+        site_index = max(1, int(progress.get("site_index") or 1))
+        percent = min(99.9, (completed_sites + site_index - 1 + site_ratio) * 100 / max(1, len(total["requested_site_ids"])))
+        round_totals = {
+            key: sum(int(item.get(key) or 0) for item in round_site_progress.values())
+            for key in ("lines", "events", "rejected")
+        }
+        snapshot = {
+            "status": "running",
+            "started_at": started,
+            "updated_at": int(time.time()),
+            "requested_site_ids": total["requested_site_ids"],
+            "completed_sites": completed_sites,
+            "total_sites": len(total["requested_site_ids"]),
+            "percent": round(percent, 1),
+            "site_id": int(progress.get("site_id") or 0),
+            "site_name": str(progress.get("site_name") or ""),
+            "current_file": source,
+            "file_index": source_index,
+            "file_count": source_count,
+            "lines": round_base["lines"] + round_totals["lines"],
+            "events": round_base["events"] + round_totals["events"],
+            "rejected": round_base["rejected"] + round_totals["rejected"],
+            "parse_workers": int(progress.get("parse_workers") or 1),
+            "logs": logs[-30:],
+        }
+        repository.set_state("history_backfill_progress", snapshot)
+        if progress_callback is not None:
+            progress_callback(snapshot)
+        last_publish = now_monotonic
+
+    logs.append({"time": started, "level": "info", "message": "开始恢复最近 {} 天历史数据，共 {} 个网站".format(history_days, len(pending))})
+    publish(force=True)
+
     backfill_config.update(
         {
             "collect_from_end": False,
@@ -400,18 +565,32 @@ def _run_history_backfill_unlocked(
             "force_tail_backfill": False,
             "only_sites_without_statistics": False,
             "reset_empty_site_cursors": False,
+            # 历史恢复使用更大的事务批次，减少 SQLite 提交和索引维护次数。
+            "batch_size": max(20000, min(50000, int(backfill_config.get("batch_size", 5000)) * 4)),
             "run_budget_seconds": max(
                 30, min(300, int(backfill_config.get("run_budget_seconds", 45)))
             ),
+            "history_cutoff_ts": history_cutoff_ts,
+            "detail_cutoff_ts": int(time.time()) - HISTORY_DETAIL_DAYS * 86400,
+            "error_detail_cutoff_ts": history_cutoff_ts,
         }
     )
     completed = set()
     while pending:
+        round_base = {key: int(total[key]) for key in ("lines", "events", "rejected")}
+        round_site_progress.clear()
+        backfill_config["_progress_callback"] = publish
         backfill_config["target_site_ids"] = list(pending)
         result = _run_once_unlocked(backfill_config)
         for key in ("sites", "lines", "events", "rejected"):
             total[key] = int(total[key]) + int(result.get(key, 0))
         total["errors"].extend(result.get("errors", []))
+        for item in result.get("errors", []):
+            logs.append({
+                "time": int(time.time()),
+                "level": "error",
+                "message": "{}：{}".format(item.get("site") or "站点", item.get("message") or "恢复失败"),
+            })
         for site_id, site_result in result.get("site_results", {}).items():
             aggregate = total["site_results"].setdefault(
                 str(site_id),
@@ -437,6 +616,7 @@ def _run_history_backfill_unlocked(
                     site_id, site_result, site_id in round_completed
                 )
         completed.update(round_completed)
+        total["completed_site_ids"] = sorted(completed)
         # 一轮的时间预算可能在后续站点开始前就耗尽；未出现在
         # completed_site_ids 的目标都必须保留到下一轮，不能静默漏掉。
         next_pending = [site_id for site_id in pending if site_id not in round_completed]
@@ -449,6 +629,40 @@ def _run_history_backfill_unlocked(
     total["incomplete_site_ids"] = sorted(pending)
     total["finished_at"] = int(time.time())
     repository.set_state("last_run", total)
+    try:
+        repository.optimize_after_history_import()
+    except Exception as error:
+        logs.append({
+            "time": int(time.time()),
+            "level": "warn",
+            "message": "数据库查询优化未完成：{}".format(str(error)[:200]),
+        })
+    logs.append({
+        "time": int(total["finished_at"]),
+        "level": "success" if total["status"] == "complete" else "warn",
+        "message": "历史数据恢复{}：导入 {} 条，忽略 {} 行".format(
+            "完成" if total["status"] == "complete" else "未完成",
+            total["events"],
+            total["rejected"],
+        ),
+    })
+    final_progress = {
+        "status": total["status"],
+        "started_at": started,
+        "updated_at": int(total["finished_at"]),
+        "finished_at": int(total["finished_at"]),
+        "requested_site_ids": total["requested_site_ids"],
+        "completed_sites": len(total["completed_site_ids"]),
+        "total_sites": len(total["requested_site_ids"]),
+        "percent": round(len(total["completed_site_ids"]) * 100 / max(1, len(total["requested_site_ids"])), 1),
+        "lines": total["lines"],
+        "events": total["events"],
+        "rejected": total["rejected"],
+        "logs": logs[-30:],
+    }
+    repository.set_state("history_backfill_progress", final_progress)
+    if progress_callback is not None:
+        progress_callback(final_progress)
     return total
 
 
@@ -488,6 +702,7 @@ def run_once(config: Optional[Dict[str, object]] = None) -> Dict[str, object]:
 def run_history_backfill(
     config: Optional[Dict[str, object]] = None,
     requested_site_ids: Optional[Iterable[int]] = None,
+    progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
 ) -> Dict[str, object]:
     lock_handle = _acquire_lock()
     if lock_handle is None:
@@ -498,6 +713,6 @@ def run_history_backfill(
             "finished_at": int(time.time()),
         }
     try:
-        return _run_history_backfill_unlocked(config, requested_site_ids)
+        return _run_history_backfill_unlocked(config, requested_site_ids, progress_callback)
     finally:
         lock_handle.close()
