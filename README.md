@@ -14,6 +14,12 @@ WebAnalytics 直接分析服务器上的 Nginx / Apache 访问日志，在宝塔
 
 无需修改网站代码，不注入前端脚本，不依赖外部 SaaS。域名、日志和访问 IP 默认只保存在你的服务器上。
 
+## 产品预览
+
+![WebAnalytics 网站访问概览](docs/images/dashboard-overview.png)
+
+概览页集中展示核心访问指标、与上一时段的变化、分钟级趋势和采集状态；其他模块可从左侧菜单进入。
+
 ## 为什么选择 WebAnalytics
 
 - **真正本地化**：采集、存储、查询和 IP 归属地均在本机完成。
