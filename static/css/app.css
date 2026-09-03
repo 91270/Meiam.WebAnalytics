@@ -253,6 +253,9 @@
 .wa-log-table th:nth-child(2), .wa-log-table td:nth-child(2) { width:58px; }
 .wa-log-table th:nth-child(3), .wa-log-table td:nth-child(3) { width:58px; }
 .wa-log-table th:nth-child(4), .wa-log-table td:nth-child(4) { width:auto; text-align:left; }
+.wa-log-table th:nth-child(5), .wa-log-table td:nth-child(5) { width:116px; text-align:left; }
+.wa-log-table th:nth-child(6), .wa-log-table td:nth-child(6) { width:150px; text-align:left; color:#65758a; }
+.wa-log-table th:nth-child(7), .wa-log-table td:nth-child(7) { width:104px; }
 .wa-status-code.is-error { color:#d95753; font-weight:600; }
 .wa-inline-tools { display:flex; align-items:center; gap:7px; }
 .wa-inline-tools input, .wa-inline-tools select, .wa-settings input, .wa-settings textarea { border:1px solid #d5dde5; border-radius:5px; background:#fff; color:#344156; font:inherit; outline:0; }

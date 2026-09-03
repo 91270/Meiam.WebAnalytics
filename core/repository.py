@@ -1198,4 +1198,7 @@ class Repository:
                    FROM recent_requests WHERE {} ORDER BY timestamp DESC LIMIT ? OFFSET ?""".format(where),
                 tuple(params) + (page_size, (page - 1) * page_size),
             ).fetchall()
-        return {"items": [dict(row) for row in rows], "total": int(total), "page": page, "page_size": page_size}
+        items = [dict(row) for row in rows]
+        for item in items:
+            item.update(locate_ip(str(item.get("remote_addr") or "")))
+        return {"items": items, "total": int(total), "page": page, "page_size": page_size}

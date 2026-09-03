@@ -41,6 +41,7 @@ class HyperLogLogTests(unittest.TestCase):
             errors = repository.get_requests(site_id, 1788310800, 1788318000, errors_only=True)
             self.assertEqual(errors["total"], 1)
             self.assertEqual(errors["items"][0]["status"], 500)
+            self.assertIn("location", errors["items"][0])
             repository.cleanup_details(1788400000, 1788400000, "2026-01-01")
             self.assertEqual(repository.get_requests(site_id, 1788310800, 1788318000)["total"], 0)
             self.assertEqual(repository.get_rank("ip", site_id, 1788310800, 1788318000)[0]["requests"], 1)

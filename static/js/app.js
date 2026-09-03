@@ -582,9 +582,9 @@
         (data.items || []).forEach(function (row) {
             var date = new Date(Number(row.timestamp || 0) * 1000).toLocaleString('zh-CN');
             var tail = kind === 'errors' ? formatBytes(row.body_bytes) : escapeHtml((row.browser || 'Other') + ' / ' + (row.device || 'Other'));
-            html += '<tr><td>' + escapeHtml(date) + '</td><td><span class="wa-status-code' + (Number(row.status) >= 400 ? ' is-error' : '') + '">' + Number(row.status || 0) + '</span></td><td>' + escapeHtml(row.method) + '</td><td title="' + escapeHtml(row.uri) + '">' + escapeHtml(row.uri) + '</td><td>' + escapeHtml(row.remote_addr) + '</td><td>' + tail + '</td></tr>';
+            html += '<tr><td>' + escapeHtml(date) + '</td><td><span class="wa-status-code' + (Number(row.status) >= 400 ? ' is-error' : '') + '">' + Number(row.status || 0) + '</span></td><td>' + escapeHtml(row.method) + '</td><td title="' + escapeHtml(row.uri) + '">' + escapeHtml(row.uri) + '</td><td>' + escapeHtml(row.remote_addr) + '</td><td title="' + escapeHtml(row.location || '未知') + '">' + escapeHtml(row.location || '未知') + '</td><td>' + tail + '</td></tr>';
         });
-        $('#wa-' + kind + '-body').html(html || '<tr><td colspan="6">当前筛选条件下暂无访问明细</td></tr>');
+        $('#wa-' + kind + '-body').html(html || '<tr><td colspan="7">当前筛选条件下暂无访问明细</td></tr>');
         var pages = Math.max(1, Math.ceil(Number(data.total || 0) / Number(data.page_size || 12)));
         var current = Number(data.page || 1), start = Math.max(1, Math.min(current - 2, pages - 4)), end = Math.min(pages, start + 4), buttons = '';
         for (var page = start; page <= end; page++) {
