@@ -372,14 +372,59 @@ class Repository:
             sketch = current
         connection.execute(
             """
-            INSERT INTO unique_hll_hour(site_id, hour_ts, kind, precision, registers, updated_at)
+            INSERT OR REPLACE INTO unique_hll_hour
+                (site_id, hour_ts, kind, precision, registers, updated_at)
             VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(site_id, hour_ts, kind) DO UPDATE SET
-                precision=excluded.precision,
-                registers=excluded.registers,
-                updated_at=excluded.updated_at
             """,
             (site_id, hour_ts, kind, sketch.precision, sketch.dumps(), int(time.time())),
+        )
+
+    @staticmethod
+    def _merge_metric_row(connection: sqlite3.Connection, site_id: int, row: sqlite3.Row) -> None:
+        values = (site_id, row["minute_ts"], row["requests"], row["pv"],
+                  row["body_bytes"], row["errors"], row["bot_requests"])
+        connection.execute(
+            """INSERT OR IGNORE INTO metric_minute
+               (site_id,minute_ts,requests,pv,body_bytes,errors,bot_requests)
+               VALUES (?,?,?,?,?,?,?)""", values,
+        )
+        connection.execute(
+            """UPDATE metric_minute SET requests=MAX(requests,?),pv=MAX(pv,?),
+               body_bytes=MAX(body_bytes,?),errors=MAX(errors,?),
+               bot_requests=MAX(bot_requests,?) WHERE site_id=? AND minute_ts=?""",
+            values[2:] + values[:2],
+        )
+
+    @staticmethod
+    def _merge_spider_row(connection: sqlite3.Connection, site_id: int, row: sqlite3.Row) -> None:
+        values = (site_id, row["minute_ts"], row["spider"], row["requests"],
+                  row["body_bytes"], row["errors"])
+        connection.execute(
+            """INSERT OR IGNORE INTO spider_minute
+               (site_id,minute_ts,spider,requests,body_bytes,errors) VALUES (?,?,?,?,?,?)""",
+            values,
+        )
+        connection.execute(
+            """UPDATE spider_minute SET requests=MAX(requests,?),
+               body_bytes=MAX(body_bytes,?),errors=MAX(errors,?)
+               WHERE site_id=? AND minute_ts=? AND spider=?""",
+            values[3:] + values[:3],
+        )
+
+    @staticmethod
+    def _merge_dimension_row(connection: sqlite3.Connection, site_id: int, row: sqlite3.Row) -> None:
+        values = (site_id, row["day"], row["dimension"], row["value"], row["requests"],
+                  row["body_bytes"], row["errors"], row["last_seen"])
+        connection.execute(
+            """INSERT OR IGNORE INTO dimension_day
+               (site_id,day,dimension,value,requests,body_bytes,errors,last_seen)
+               VALUES (?,?,?,?,?,?,?,?)""", values,
+        )
+        connection.execute(
+            """UPDATE dimension_day SET requests=MAX(requests,?),
+               body_bytes=MAX(body_bytes,?),errors=MAX(errors,?),last_seen=MAX(last_seen,?)
+               WHERE site_id=? AND day=? AND dimension=? AND value=?""",
+            values[4:] + values[:4],
         )
 
     @classmethod
@@ -389,48 +434,25 @@ class Repository:
         """合并同一宝塔站点因日志路径变化产生的重复内部记录。"""
         if canonical_id == duplicate_id:
             return
-        connection.execute(
-            """
-            INSERT INTO metric_minute(site_id, minute_ts, requests, pv, body_bytes,
-                                      errors, bot_requests)
-            SELECT ?, minute_ts, requests, pv, body_bytes, errors, bot_requests
-            FROM metric_minute WHERE site_id=?
-            ON CONFLICT(site_id, minute_ts) DO UPDATE SET
-                requests=MAX(metric_minute.requests, excluded.requests),
-                pv=MAX(metric_minute.pv, excluded.pv),
-                body_bytes=MAX(metric_minute.body_bytes, excluded.body_bytes),
-                errors=MAX(metric_minute.errors, excluded.errors),
-                bot_requests=MAX(metric_minute.bot_requests, excluded.bot_requests)
-            """,
-            (canonical_id, duplicate_id),
-        )
-        connection.execute(
-            """INSERT INTO spider_minute
-               (site_id,minute_ts,spider,requests,body_bytes,errors)
-               SELECT ?,minute_ts,spider,requests,body_bytes,errors
-               FROM spider_minute WHERE site_id=?
-               ON CONFLICT(site_id,minute_ts,spider) DO UPDATE SET
-                   requests=MAX(spider_minute.requests,excluded.requests),
-                   body_bytes=MAX(spider_minute.body_bytes,excluded.body_bytes),
-                   errors=MAX(spider_minute.errors,excluded.errors)""",
-            (canonical_id, duplicate_id),
-        )
+        for row in connection.execute(
+            "SELECT minute_ts,requests,pv,body_bytes,errors,bot_requests "
+            "FROM metric_minute WHERE site_id=?", (duplicate_id,)
+        ).fetchall():
+            cls._merge_metric_row(connection, canonical_id, row)
+        for row in connection.execute(
+            "SELECT minute_ts,spider,requests,body_bytes,errors "
+            "FROM spider_minute WHERE site_id=?", (duplicate_id,)
+        ).fetchall():
+            cls._merge_spider_row(connection, canonical_id, row)
         connection.execute(
             """UPDATE recent_requests SET site_id=? WHERE site_id=?""",
             (canonical_id, duplicate_id),
         )
-        connection.execute(
-            """INSERT INTO dimension_day
-               (site_id,day,dimension,value,requests,body_bytes,errors,last_seen)
-               SELECT ?,day,dimension,value,requests,body_bytes,errors,last_seen
-               FROM dimension_day WHERE site_id=?
-               ON CONFLICT(site_id,day,dimension,value) DO UPDATE SET
-                   requests=MAX(dimension_day.requests,excluded.requests),
-                   body_bytes=MAX(dimension_day.body_bytes,excluded.body_bytes),
-                   errors=MAX(dimension_day.errors,excluded.errors),
-                   last_seen=MAX(dimension_day.last_seen,excluded.last_seen)""",
-            (canonical_id, duplicate_id),
-        )
+        for row in connection.execute(
+            "SELECT day,dimension,value,requests,body_bytes,errors,last_seen "
+            "FROM dimension_day WHERE site_id=?", (duplicate_id,)
+        ).fetchall():
+            cls._merge_dimension_row(connection, canonical_id, row)
         for table, hash_column in (
             ("visitor_day", "visitor_hash"),
             ("ip_day", "ip_hash"),
@@ -555,18 +577,9 @@ class Repository:
                                 )
                     return canonical_id
             connection.execute(
-                """
-                INSERT INTO sites(panel_site_id, name, document_root, log_path, web_server,
-                                  enabled, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, 1, ?, ?)
-                ON CONFLICT(log_path) DO UPDATE SET
-                    panel_site_id=excluded.panel_site_id,
-                    name=excluded.name,
-                    document_root=excluded.document_root,
-                    web_server=excluded.web_server,
-                    enabled=1,
-                    updated_at=excluded.updated_at
-                """,
+                """INSERT OR IGNORE INTO sites
+                   (panel_site_id,name,document_root,log_path,web_server,enabled,created_at,updated_at)
+                   VALUES (?, ?, ?, ?, ?, 1, ?, ?)""",
                 (
                     site.panel_site_id,
                     site.name,
@@ -576,6 +589,12 @@ class Repository:
                     now,
                     now,
                 ),
+            )
+            connection.execute(
+                """UPDATE sites SET panel_site_id=?,name=?,document_root=?,web_server=?,
+                   enabled=1,updated_at=? WHERE log_path=?""",
+                (site.panel_site_id, site.name, site.document_root, site.web_server,
+                 now, site.log_path),
             )
             row = connection.execute(
                 "SELECT id FROM sites WHERE log_path=?", (site.log_path,)
@@ -701,21 +720,7 @@ class Repository:
         log_path: str,
         cursor: FileCursor,
     ) -> None:
-        connection.execute(
-            """
-            INSERT INTO file_cursors(site_id, log_path, inode, device, offset, size,
-                                     mtime_ns, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(site_id) DO UPDATE SET
-                log_path=excluded.log_path,
-                inode=excluded.inode,
-                device=excluded.device,
-                offset=excluded.offset,
-                size=excluded.size,
-                mtime_ns=excluded.mtime_ns,
-                updated_at=excluded.updated_at
-            """,
-            (
+        values = (
                 site_id,
                 log_path,
                 str(cursor.inode),
@@ -724,7 +729,16 @@ class Repository:
                 cursor.size,
                 cursor.mtime_ns,
                 int(time.time()),
-            ),
+            )
+        connection.execute(
+            """UPDATE file_cursors SET log_path=?,inode=?,device=?,offset=?,size=?,
+               mtime_ns=?,updated_at=? WHERE site_id=?""",
+            values[1:] + (values[0],),
+        )
+        connection.execute(
+            """INSERT OR IGNORE INTO file_cursors
+               (site_id,log_path,inode,device,offset,size,mtime_ns,updated_at)
+               VALUES (?,?,?,?,?,?,?,?)""", values,
         )
 
     def record_batch(
@@ -817,19 +831,7 @@ class Repository:
 
         with self.session() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            connection.executemany(
-                """
-                    INSERT INTO metric_minute(site_id, minute_ts, requests, pv, body_bytes,
-                                              errors, bot_requests)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(site_id, minute_ts) DO UPDATE SET
-                        requests=requests+excluded.requests,
-                        pv=pv+excluded.pv,
-                        body_bytes=body_bytes+excluded.body_bytes,
-                        errors=errors+excluded.errors,
-                        bot_requests=bot_requests+excluded.bot_requests
-                    """,
-                [(
+            metric_rows = [(
                         site_id,
                         minute,
                         item["requests"],
@@ -837,20 +839,32 @@ class Repository:
                         item["bytes"],
                         item["errors"],
                         item["bots"],
-                    ) for minute, item in minute_stats.items()],
+                    ) for minute, item in minute_stats.items()]
+            connection.executemany(
+                """UPDATE metric_minute SET requests=requests+?,pv=pv+?,
+                   body_bytes=body_bytes+?,errors=errors+?,bot_requests=bot_requests+?
+                   WHERE site_id=? AND minute_ts=?""",
+                [(row[2], row[3], row[4], row[5], row[6], row[0], row[1])
+                 for row in metric_rows],
+            )
+            connection.executemany(
+                """INSERT OR IGNORE INTO metric_minute
+                   (site_id,minute_ts,requests,pv,body_bytes,errors,bot_requests)
+                   VALUES (?,?,?,?,?,?,?)""", metric_rows,
             )
             for (hour, kind), sketch in unique_sketches.items():
                 self._store_hll(connection, site_id, hour, kind, sketch)
+            spider_rows = [(site_id, minute, spider, item["requests"], item["bytes"], item["errors"])
+                           for (minute, spider), item in spider_stats.items()]
             connection.executemany(
-                """INSERT INTO spider_minute
-                       (site_id,minute_ts,spider,requests,body_bytes,errors)
-                       VALUES (?,?,?,?,?,?)
-                       ON CONFLICT(site_id,minute_ts,spider) DO UPDATE SET
-                           requests=requests+excluded.requests,
-                           body_bytes=body_bytes+excluded.body_bytes,
-                           errors=errors+excluded.errors""",
-                [(site_id, minute, spider, item["requests"], item["bytes"], item["errors"])
-                 for (minute, spider), item in spider_stats.items()],
+                """UPDATE spider_minute SET requests=requests+?,body_bytes=body_bytes+?,
+                   errors=errors+? WHERE site_id=? AND minute_ts=? AND spider=?""",
+                [(row[3], row[4], row[5], row[0], row[1], row[2]) for row in spider_rows],
+            )
+            connection.executemany(
+                """INSERT OR IGNORE INTO spider_minute
+                   (site_id,minute_ts,spider,requests,body_bytes,errors)
+                   VALUES (?,?,?,?,?,?)""", spider_rows,
             )
             connection.executemany(
                 """INSERT INTO recent_requests
@@ -859,18 +873,20 @@ class Repository:
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 request_rows,
             )
-            connection.executemany(
-                """INSERT INTO dimension_day
-                       (site_id,day,dimension,value,requests,body_bytes,errors,last_seen)
-                       VALUES (?,?,?,?,?,?,?,?)
-                       ON CONFLICT(site_id,day,dimension,value) DO UPDATE SET
-                           requests=requests+excluded.requests,
-                           body_bytes=body_bytes+excluded.body_bytes,
-                           errors=errors+excluded.errors,
-                           last_seen=MAX(dimension_day.last_seen,excluded.last_seen)""",
-                [(site_id, day, dimension, value, item["requests"], item["bytes"],
+            dimension_rows = [(site_id, day, dimension, value, item["requests"], item["bytes"],
                   item["errors"], item["last_seen"])
-                 for (day, dimension, value), item in dimension_stats.items()],
+                 for (day, dimension, value), item in dimension_stats.items()]
+            connection.executemany(
+                """UPDATE dimension_day SET requests=requests+?,body_bytes=body_bytes+?,
+                   errors=errors+?,last_seen=MAX(last_seen,?)
+                   WHERE site_id=? AND day=? AND dimension=? AND value=?""",
+                [(row[4], row[5], row[6], row[7], row[0], row[1], row[2], row[3])
+                 for row in dimension_rows],
+            )
+            connection.executemany(
+                """INSERT OR IGNORE INTO dimension_day
+                   (site_id,day,dimension,value,requests,body_bytes,errors,last_seen)
+                   VALUES (?,?,?,?,?,?,?,?)""", dimension_rows,
             )
             if cursor is not None:
                 self._upsert_cursor(connection, site_id, canonical_log_path, cursor)
@@ -896,15 +912,14 @@ class Repository:
     def set_state(self, key: str, value: Any) -> None:
         serialized = json.dumps(value, ensure_ascii=False)
         with self.session() as connection:
+            now = int(time.time())
             connection.execute(
-                """
-                INSERT INTO runtime_state(state_key, state_value, updated_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(state_key) DO UPDATE SET
-                    state_value=excluded.state_value,
-                    updated_at=excluded.updated_at
-                """,
-                (key, serialized, int(time.time())),
+                "UPDATE runtime_state SET state_value=?,updated_at=? WHERE state_key=?",
+                (serialized, now, key),
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO runtime_state(state_key,state_value,updated_at) VALUES (?,?,?)",
+                (key, serialized, now),
             )
 
     def optimize_after_history_import(self) -> None:

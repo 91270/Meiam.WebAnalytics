@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,6 +31,10 @@ class LegacyRepository:
 
 
 class MainCompatibilityTests(unittest.TestCase):
+    def test_repository_avoids_sqlite_324_upsert_syntax(self):
+        source = inspect.getsource(CoreRepository)
+        self.assertNotIn("ON CONFLICT", source.upper())
+
     def test_panel_runtime_uses_versioned_module_namespace(self):
         self.assertTrue(
             main_module.Repository.__module__.startswith("_webanalytics_runtime_0511.")
